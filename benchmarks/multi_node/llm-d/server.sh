@@ -107,6 +107,13 @@ export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-$DEFAULT_IFACE}
 export VLLM_SKIP_P2P_CHECK=1
 export VLLM_RANDOMIZE_DP_DUMMY_INPUTS=1
 export VLLM_USE_DEEP_GEMM=1
+# DeepGEMM JIT-compiles CUDA kernels at warmup and links against
+# libcuda.so.1. In ghcr.io/llm-d/llm-d-cuda the lib lives under
+# /usr/local/cuda/compat/, which is in LD_LIBRARY_PATH (runtime) but
+# NOT in LIBRARY_PATH (link time). Prepend it so ld can resolve
+# -l:libcuda.so.1. The /usr/lib/x86_64-linux-gnu fallback covers
+# NVIDIA Container Toolkit injection paths on Linux hosts.
+export LIBRARY_PATH=/usr/local/cuda/compat:/usr/lib/x86_64-linux-gnu:${LIBRARY_PATH:-}
 export VLLM_NIXL_SIDE_CHANNEL_HOST="$HOST_IP"
 export VLLM_LOGGING_LEVEL=${VLLM_LOGGING_LEVEL:-INFO}
 
