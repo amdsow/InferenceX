@@ -83,9 +83,9 @@ srun \
 set -euo pipefail
 echo \"Rank \$SLURM_PROCID on \$(hostname)\"
 
-sudo docker ps -aq --filter name=\"^${DOCKER_CONT_NAME}_\" | xargs -r sudo docker rm -f || true
+docker ps -aq --filter name=\"^${DOCKER_CONT_NAME}_\" | xargs -r docker rm -f || true
 
-exec sudo docker run --rm \
+exec docker run --rm \
     --init \
     --stop-timeout 10 \
     --network host \
@@ -144,4 +144,4 @@ exec sudo docker run --rm \
     '
 "
 
-srun bash -c "sudo docker ps -aq --filter name=\"^${DOCKER_CONT_NAME}_\" | xargs -r sudo docker rm -f" || true
+srun bash -c "docker ps -aq --filter name=\"^${DOCKER_CONT_NAME}_\" | xargs -r docker rm -f" || true
