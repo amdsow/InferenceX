@@ -12,9 +12,13 @@ set -euo pipefail
 echo "=== llm-d job start ==="
 echo "UTC: $(TZ=UTC date '+%Y-%m-%d %H:%M:%S %Z')"
 
-# Repo root (benchmarks/multi_node/llm-d/job.slurm -> ../../..)
-DI_REPO_DIR=$(cd "$(dirname "$0")/../../.." && pwd)
+# Repo root. $(pwd) = the sbatch submit dir, which the wrapper sets to
+# benchmarks/multi_node/llm-d/ before invoking submit.sh, so 3 up =
+# repo root. Using $(dirname "$0") would resolve to a SLURM staging
+# copy under /var/spool/... and miss the checkout entirely.
+DI_REPO_DIR=$(cd "$(pwd)/../../.." && pwd)
 export DI_REPO_DIR
+echo "REPO DIR: ${DI_REPO_DIR}"
 
 ALL_NODES=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
 TOTAL_NODES=$(echo "$ALL_NODES" | wc -l)
