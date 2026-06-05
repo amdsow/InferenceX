@@ -76,11 +76,19 @@ dataLayer:
 # server.sh. The cross-node DP coordination flags
 # (--data-parallel-hybrid-lb, --data-parallel-size-local, etc.) are NOT
 # emitted because LWS_GROUP_SIZE = PREFILL_NODES = DECODE_NODES = 1.
+# Prefill tuning (H200, 140 GB HBM):
+# Peer 1P+1D DSv4 vLLM disagg recipes (b200-low-latency, b300-low-latency,
+# gb200-low-latency in benchmarks/multi_node/srt-slurm-recipes/vllm/
+# deepseek-v4/8k1k/) run prefill at DP=8 EP=8 with 32K batched-tokens and
+# gpu-memory-utilization 0.80, but only on >=180 GB HBM cards. On H200
+# the peer 32K shape OOMs the fused-MoE workspace allocator
+# (vllm/v1/worker/workspace.py). Drop batched-tokens to 8K and align
+# headroom to the peer 0.80 to fit the workspace inside H200 HBM.
 prefill:
   extra-args: >-
-    --gpu-memory-utilization 0.85
+    --gpu-memory-utilization 0.80
     --kv-cache-dtype fp8
-    --max-num-batched-tokens 32768
+    --max-num-batched-tokens 8192
     --max-num-seqs 16
     --block-size 256
     --no-enable-prefix-caching
