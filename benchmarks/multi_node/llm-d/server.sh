@@ -338,7 +338,12 @@ PY
         [[ "$num_prompts" -lt 16 ]] && num_prompts=16
         # Bench against Envoy. EPP routes to decode (and decode sidecar
         # pulls from prefill via NIXL).
+        # --bench-serving-dir resolves to the in-container repo bind-mount
+        # (job.slurm bind-mounts $DI_REPO_DIR onto /workspace). Without it
+        # run_benchmark_serving falls back to $(pwd), which on this image
+        # is /home/vllm and does not contain utils/bench_serving/.
         run_benchmark_serving \
+            --bench-serving-dir /workspace \
             --model "$MODEL_NAME" \
             --port "$ENVOY_PORT" \
             --backend openai \
