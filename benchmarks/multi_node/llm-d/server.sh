@@ -235,8 +235,24 @@ PY
 
     # EPP config: recipe override, else the default mounted by job.slurm
     # at /etc/epp/config.yaml (sourced from benchmarks/llm-d/epp-config.yaml).
+    #
+    # The recipe yaml is a single-file mix: EPP scheduler keys
+    # (apiVersion, kind, plugins, schedulingProfiles, dataLayer) plus
+    # per-role vLLM extra-args (prefill, decode) plus slurm hints. EPP's
+    # strict YAML decoder rejects the latter ("unknown field \"prefill\""),
+    # so when a recipe is in play we project it down to just the EPP keys
+    # and hand EPP that.
     if [[ -n "$CONFIG_FILE" && -f "/etc/llmd-recipes/$CONFIG_FILE" ]]; then
-        EPP_CONFIG="/etc/llmd-recipes/$CONFIG_FILE"
+        EPP_CONFIG="/tmp/epp-config-from-recipe.yaml"
+        python3 - <<PY
+import yaml
+recipe = yaml.safe_load(open('/etc/llmd-recipes/${CONFIG_FILE}'))
+# Keys EPP's strict decoder accepts. Anything else (prefill, decode,
+# slurm, ...) is dropped before passing to --config-file.
+keep = {'apiVersion', 'kind', 'plugins', 'schedulingProfiles', 'dataLayer'}
+yaml.safe_dump({k: v for k, v in recipe.items() if k in keep},
+               open('${EPP_CONFIG}', 'w'))
+PY
     else
         EPP_CONFIG="/etc/epp/config.yaml"
     fi
