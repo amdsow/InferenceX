@@ -6,6 +6,26 @@
 export SLURM_PARTITION="main"
 export SLURM_ACCOUNT="sa-shared"
 
+# Inline copies of agentic_pip_install / ensure_hf_cli from
+# benchmarks/benchmark_lib.sh. We can't safely source the whole lib here
+# (it ships container-only side effects), but we want the same hf-CLI
+# install path the rest of the repo uses so model staging on the runner
+# host matches `hf download "$MODEL"` in single-node scripts.
+agentic_pip_install() {
+    local pip_install=(python3 -m pip install)
+    if python3 -m pip install --help 2>/dev/null | grep -q -- "--break-system-packages"; then
+        pip_install+=(--break-system-packages)
+    fi
+    "${pip_install[@]}" "$@"
+}
+ensure_hf_cli() {
+    if command -v hf >/dev/null 2>&1; then return 0; fi
+    agentic_pip_install --quiet --user "huggingface_hub[cli]>=0.25.0"
+    # pip --user puts the binary under ~/.local/bin; make it visible.
+    export PATH="$HOME/.local/bin:$PATH"
+    command -v hf >/dev/null 2>&1
+}
+
 set -x
 
 if [[ "$IS_MULTINODE" == "true" ]]; then
@@ -24,45 +44,26 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
             # the container, so MODEL_PATH must be an existing host
             # directory (an HF id alone will not work). Resolution order:
             #   1. /models/gpt-oss-120b (cluster-shared, staged by an admin)
-            #   2. $HOME/inferencex-models/gpt-oss-120b (per-runner, written
-            #      by this script - downloaded once, cached across dispatches)
-            # The download happens inline on the runner host so users with
-            # only gh-dispatch access can stage the model without ssh.
+            #   2. $HOME/inferencex-models/gpt-oss-120b (per-runner, staged
+            #      here via `hf download`; cached across dispatches)
             GPTOSS_LOCAL_DIR="$HOME/inferencex-models/gpt-oss-120b"
-            export GPTOSS_LOCAL_DIR
             if [[ -d "/models/gpt-oss-120b" ]]; then
                 export MODEL_PATH="/models/gpt-oss-120b"
             else
                 mkdir -p "$HOME/inferencex-models"
-                stage_gptoss_120b() {
+                # flock serializes concurrent dispatches so a second
+                # run waits instead of racing the first download.
+                if ! (
                     set -euo pipefail
-                    # flock serializes concurrent dispatches so a second
-                    # run waits instead of racing the first download.
                     exec 200>"$HOME/inferencex-models/.gpt-oss-120b.download.lock"
                     flock -x 200
                     if [[ -d "$GPTOSS_LOCAL_DIR" && -n "$(ls -A "$GPTOSS_LOCAL_DIR" 2>/dev/null)" ]]; then
-                        return 0  # already staged
+                        exit 0
                     fi
                     echo "Staging openai/gpt-oss-120b -> $GPTOSS_LOCAL_DIR (one-time, ~60 GB)"
-                    if ! command -v huggingface-cli >/dev/null 2>&1 \
-                        && ! python3 -c "import huggingface_hub" 2>/dev/null; then
-                        echo "Installing huggingface_hub via pip --user"
-                        python3 -m pip install --user --quiet huggingface_hub
-                        export PATH="$HOME/.local/bin:$PATH"
-                    fi
-                    if command -v huggingface-cli >/dev/null 2>&1; then
-                        huggingface-cli download openai/gpt-oss-120b \
-                            --local-dir "$GPTOSS_LOCAL_DIR"
-                    else
-                        python3 - <<'PY'
-import os
-from huggingface_hub import snapshot_download
-snapshot_download(repo_id="openai/gpt-oss-120b",
-                  local_dir=os.environ["GPTOSS_LOCAL_DIR"])
-PY
-                    fi
-                }
-                if ! stage_gptoss_120b; then
+                    ensure_hf_cli
+                    hf download openai/gpt-oss-120b --local-dir "$GPTOSS_LOCAL_DIR"
+                ); then
                     echo "Error: failed to stage gpt-oss-120b on this runner." >&2
                     exit 1
                 fi
