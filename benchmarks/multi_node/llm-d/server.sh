@@ -265,6 +265,7 @@ PY
         --grpc-port="$EPP_GRPC_PORT" \
         --grpc-health-port="$EPP_HEALTH_PORT" \
         --metrics-port="$EPP_METRICS_PORT" \
+        --v=4 \
         > "$EPP_LOG" 2>&1 &
     EPP_PID=$!
 
