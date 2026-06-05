@@ -98,6 +98,7 @@ prefill:
     --max-model-len 16384
     --block-size 256
     --no-enable-prefix-caching
+    --enforce-eager
   env: {}
 
 decode:
