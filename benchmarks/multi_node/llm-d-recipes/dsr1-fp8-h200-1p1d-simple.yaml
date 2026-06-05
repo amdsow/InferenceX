@@ -82,14 +82,20 @@ dataLayer:
 # deepseek-v4/8k1k/) run prefill at DP=8 EP=8 with 32K batched-tokens and
 # gpu-memory-utilization 0.80, but only on >=180 GB HBM cards. On H200
 # the peer 32K shape OOMs the fused-MoE workspace allocator
-# (vllm/v1/worker/workspace.py). Drop batched-tokens to 8K and align
-# headroom to the peer 0.80 to fit the workspace inside H200 HBM.
+# (vllm/v1/worker/workspace.py). Drop batched-tokens to 8K so the workspace
+# fits, then move gpu-memory-utilization to 0.90 (matching the decode role
+# and the gb300-4p1d / gb300-1p6d peers) so KV cache has positive headroom
+# after weights+workspace+cudagraphs - at 0.80 vLLM reports
+# "Available KV cache memory: -3.23 GiB". Cap max-model-len at 16384 to
+# align with peer recipes and keep the KV manager from provisioning for
+# DSR1's 128K default context.
 prefill:
   extra-args: >-
-    --gpu-memory-utilization 0.80
+    --gpu-memory-utilization 0.90
     --kv-cache-dtype fp8
     --max-num-batched-tokens 8192
     --max-num-seqs 16
+    --max-model-len 16384
     --block-size 256
     --no-enable-prefix-caching
   env: {}
@@ -100,6 +106,7 @@ decode:
     --kv-cache-dtype fp8
     --max-num-batched-tokens 256
     --max-num-seqs 256
+    --max-model-len 16384
     --block-size 256
     --no-enable-prefix-caching
   env: {}
