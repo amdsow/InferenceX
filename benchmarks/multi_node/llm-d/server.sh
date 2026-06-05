@@ -290,7 +290,28 @@ PY
     envoy -c /etc/envoy/envoy.yaml > "$ENVOY_LOG" 2>&1 &
     ENVOY_PID=$!
 
-    wait_for_server_ready --port "$ENVOY_PORT" --server-log "$ENVOY_LOG" --server-pid "$ENVOY_PID"
+    # Probe Envoy's admin /ready (port 9901) instead of /health on :8080.
+    # /health on :8080 routes through ext_proc -> EPP -> ORIGINAL_DST, which
+    # only resolves once a request has the right model/profile metadata for
+    # EPP to set x-gateway-destination-endpoint. Health-style requests
+    # without that metadata get 503 and the wait loop spins forever.
+    echo "Waiting for envoy admin on 127.0.0.1:9901/ready"
+    ENVOY_WAIT_DEADLINE=$(( $(date +%s) + 120 ))
+    until [[ "$(curl --output /dev/null --silent --write-out '%{http_code}' \
+                "http://127.0.0.1:9901/ready" 2>/dev/null)" == "200" ]]; do
+        if ! kill -0 "$ENVOY_PID" 2>/dev/null; then
+            echo "ERROR: envoy died before admin /ready returned 200" >&2
+            tail -n 80 "$ENVOY_LOG" >&2 || true
+            exit 1
+        fi
+        if [[ "$(date +%s)" -ge "$ENVOY_WAIT_DEADLINE" ]]; then
+            echo "ERROR: envoy admin /ready did not return 200 within 120s" >&2
+            tail -n 80 "$ENVOY_LOG" >&2 || true
+            exit 1
+        fi
+        sleep 2
+    done
+    echo "Envoy admin ready; listener should be on $ENVOY_PORT"
 
     # Wait for the prefill leader's sidecar before starting the bench.
     # wait_for_server_ready can only probe localhost; the prefill leader

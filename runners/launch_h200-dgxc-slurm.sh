@@ -106,6 +106,20 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
         fi
         echo "Submitted llm-d job: $JOB_ID"
 
+        # Make sure the server-log tarball ships even when this step is
+        # killed mid-flight (e.g. workflow cancel): without the trap the
+        # body of this branch is interrupted before the tar+cp below run,
+        # the `Upload server logs` step finds no file, and the user sees
+        # nothing about what happened inside the container.
+        bundle_server_logs() {
+            if [[ -d "$BENCHMARK_LOGS_DIR" ]] && compgen -G "$BENCHMARK_LOGS_DIR/*" >/dev/null 2>&1; then
+                tar czf "$GITHUB_WORKSPACE/multinode_server_logs.tar.gz" \
+                    -C "$BENCHMARK_LOGS_DIR" . 2>/dev/null || \
+                    echo "WARNING: failed to bundle multinode_server_logs.tar.gz" >&2
+            fi
+        }
+        trap 'bundle_server_logs; scancel "$JOB_ID" 2>/dev/null || true' EXIT INT TERM HUP
+
         LOG_FILE="${BENCHMARK_LOGS_DIR}/slurm_job-${JOB_ID}.out"
 
         # Wait for log file (also catch early failures).
@@ -129,18 +143,9 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
         tail -F -s 2 -n+1 "$LOG_FILE" --pid=$POLL_PID 2>/dev/null
         wait $POLL_PID
 
-        # Bundle every server-side log into the artifact path the
-        # `Upload server logs` workflow step picks up. Without this, the
-        # llm-d-vllm path (this branch) leaves the logs on the runner
-        # host where the user cannot reach them - epp.log, vllm_*.log,
-        # sidecar_*.log, envoy_*.log, slurm_job-*.{out,err}, etc.
-        if [[ -d "$BENCHMARK_LOGS_DIR" ]] && compgen -G "$BENCHMARK_LOGS_DIR/*" >/dev/null 2>&1; then
-            tar czf "$GITHUB_WORKSPACE/multinode_server_logs.tar.gz" \
-                -C "$BENCHMARK_LOGS_DIR" . 2>/dev/null || \
-                echo "WARNING: failed to bundle multinode_server_logs.tar.gz" >&2
-        fi
-
-        # Result collection: same shape as AMD path.
+        # Result collection: same shape as AMD path. The server-log
+        # tarball is produced by the EXIT trap above (so it ships even
+        # when this step is cancelled mid-flight).
         for result_file in $(find "${BENCHMARK_LOGS_DIR}" -name "${RESULT_FILENAME}*.json" 2>/dev/null); do
             file_name=$(basename "$result_file")
             cp "$result_file" "$GITHUB_WORKSPACE/${file_name}"
