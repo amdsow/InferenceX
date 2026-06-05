@@ -155,8 +155,10 @@ COMMON_ARGS=(
     --tensor-parallel-size "$TP_SIZE"
     --data-parallel-size "$DP_SIZE"
     --kv_transfer_config "$KV_TRANSFER_CONFIG"
-    --moe-backend deep_gemm
 )
+# --moe-backend is model-specific (DSR1-FP8 wants deep_gemm, gpt-oss-MXFP4
+# rejects it - see vllm/.../oracle/mxfp4.py:163), so each recipe sets its
+# own value via prefill/decode extra-args instead of inheriting one here.
 
 if [[ "$LWS_GROUP_SIZE" -gt 1 ]]; then
     COMMON_ARGS+=(

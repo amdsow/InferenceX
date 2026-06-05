@@ -99,6 +99,7 @@ prefill:
     --block-size 256
     --no-enable-prefix-caching
     --enforce-eager
+    --moe-backend deep_gemm
   env: {}
 
 decode:
@@ -110,6 +111,7 @@ decode:
     --max-model-len 16384
     --block-size 256
     --no-enable-prefix-caching
+    --moe-backend deep_gemm
   env: {}
 
 # ---- SLURM resource directives ----
