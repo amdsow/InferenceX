@@ -29,33 +29,47 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
             # The download happens inline on the runner host so users with
             # only gh-dispatch access can stage the model without ssh.
             GPTOSS_LOCAL_DIR="$HOME/inferencex-models/gpt-oss-120b"
+            export GPTOSS_LOCAL_DIR
             if [[ -d "/models/gpt-oss-120b" ]]; then
                 export MODEL_PATH="/models/gpt-oss-120b"
             else
                 mkdir -p "$HOME/inferencex-models"
-                # flock serializes concurrent dispatches so a second run
-                # waits for the first download to finish instead of racing.
-                (
+                stage_gptoss_120b() {
+                    set -euo pipefail
+                    # flock serializes concurrent dispatches so a second
+                    # run waits instead of racing the first download.
+                    exec 200>"$HOME/inferencex-models/.gpt-oss-120b.download.lock"
                     flock -x 200
-                    if [[ ! -d "$GPTOSS_LOCAL_DIR" ]]; then
-                        echo "Staging openai/gpt-oss-120b -> $GPTOSS_LOCAL_DIR (one-time, ~60 GB)"
-                        if command -v huggingface-cli >/dev/null 2>&1; then
-                            huggingface-cli download openai/gpt-oss-120b \
-                                --local-dir "$GPTOSS_LOCAL_DIR"
-                        elif python3 -c "import huggingface_hub" 2>/dev/null; then
-                            python3 - <<'PY'
+                    if [[ -d "$GPTOSS_LOCAL_DIR" && -n "$(ls -A "$GPTOSS_LOCAL_DIR" 2>/dev/null)" ]]; then
+                        return 0  # already staged
+                    fi
+                    echo "Staging openai/gpt-oss-120b -> $GPTOSS_LOCAL_DIR (one-time, ~60 GB)"
+                    if ! command -v huggingface-cli >/dev/null 2>&1 \
+                        && ! python3 -c "import huggingface_hub" 2>/dev/null; then
+                        echo "Installing huggingface_hub via pip --user"
+                        python3 -m pip install --user --quiet huggingface_hub
+                        export PATH="$HOME/.local/bin:$PATH"
+                    fi
+                    if command -v huggingface-cli >/dev/null 2>&1; then
+                        huggingface-cli download openai/gpt-oss-120b \
+                            --local-dir "$GPTOSS_LOCAL_DIR"
+                    else
+                        python3 - <<'PY'
 import os
 from huggingface_hub import snapshot_download
 snapshot_download(repo_id="openai/gpt-oss-120b",
                   local_dir=os.environ["GPTOSS_LOCAL_DIR"])
 PY
-                        else
-                            echo "Error: neither huggingface-cli nor python3 huggingface_hub available." >&2
-                            echo "       Cannot auto-stage gpt-oss-120b on this runner." >&2
-                            exit 1
-                        fi
                     fi
-                ) 200>"$HOME/inferencex-models/.gpt-oss-120b.download.lock"
+                }
+                if ! stage_gptoss_120b; then
+                    echo "Error: failed to stage gpt-oss-120b on this runner." >&2
+                    exit 1
+                fi
+                if [[ ! -d "$GPTOSS_LOCAL_DIR" ]] || [[ -z "$(ls -A "$GPTOSS_LOCAL_DIR" 2>/dev/null)" ]]; then
+                    echo "Error: $GPTOSS_LOCAL_DIR is empty after staging step." >&2
+                    exit 1
+                fi
                 export MODEL_PATH="$GPTOSS_LOCAL_DIR"
             fi
             export MODEL_NAME="gpt-oss-120b"
