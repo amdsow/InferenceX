@@ -19,6 +19,16 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
         if [[ $MODEL_PREFIX == "dsr1" && $PRECISION == "fp8" ]]; then
             export MODEL_PATH="/models/DeepSeek-R1-0528"
             export MODEL_NAME="DeepSeek-R1-0528"
+        elif [[ $MODEL_PREFIX == "gptoss" && $PRECISION == "fp4" ]]; then
+            # Try the cluster's pre-staged path first; fall back to the HF
+            # id so the first run can pull the model if /models/ is empty.
+            # Same shape as launch_b200-dgxc-slurm.sh DSv4-Pro detection.
+            if [[ -d "/models/gpt-oss-120b" ]]; then
+                export MODEL_PATH="/models/gpt-oss-120b"
+            else
+                export MODEL_PATH="openai/gpt-oss-120b"
+            fi
+            export MODEL_NAME="gpt-oss-120b"
         else
             echo "Unsupported MODEL_PREFIX/PRECISION for llm-d-vllm on H200: $MODEL_PREFIX/$PRECISION" >&2
             exit 1

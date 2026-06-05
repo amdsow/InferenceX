@@ -1,0 +1,100 @@
+# gpt-oss-120b (MXFP4) on H200, simple 1P+1D P/D disagg.
+#
+# Smoke-test sibling of dsr1-fp8-h200-1p1d-simple.yaml. Same llm-d-vllm
+# scaffolding (EPP plugins/profiles/dataLayer + per-role extra-args), but
+# with a much smaller MoE so the H200 (140 GB HBM) has comfortable
+# headroom for workspace, KV cache, and cudagraph capture.
+#
+# At EP=8, gpt-oss-120b puts ~15 GB of weights on each rank vs DSR1's
+# ~84 GB, so the workspace/KV/cudagraph fights from the DSR1 recipe go
+# away and the per-role flags are dramatically simpler.
+#
+#   1 prefill node (DP=8 EP=8 dp-attn, intra-node EP over NVLink)
+#   1 decode  node (DP=8 EP=8 dp-attn, intra-node EP over NVLink)
+#   total 2 H200 nodes / 16 GPUs.
+#
+# Selected via additional-settings: CONFIG_FILE=gptoss-fp4-h200-1p1d-simple.yaml
+# with PREFILL_NODES=1 DECODE_NODES=1 from the wrapper.
+
+# ---- EPP scheduling config ----
+# Identical to dsr1-fp8-h200-1p1d-simple.yaml. Plugins, profiles, scorer
+# weights are model-agnostic - they govern routing, not engine config.
+apiVersion: llm-d.ai/v1alpha1
+kind: EndpointPickerConfig
+
+plugins:
+  - name: file-disc
+    type: file-discovery
+    parameters:
+      path: /tmp/endpoints.yaml
+      watchFile: false
+
+  - type: disagg-headers-handler
+  - type: always-disagg-pd-decider
+  - type: disagg-profile-handler
+    parameters:
+      deciderPluginName: always-disagg-pd-decider
+  - type: prefill-filter
+  - type: decode-filter
+  - type: prefix-cache-scorer
+  - type: queue-scorer
+  - type: kv-cache-utilization-scorer
+  - type: active-request-scorer
+  - type: max-score-picker
+
+schedulingProfiles:
+  - name: prefill
+    plugins:
+      - pluginRef: prefill-filter
+      - pluginRef: prefix-cache-scorer
+        weight: 3
+      - pluginRef: queue-scorer
+        weight: 2
+      - pluginRef: kv-cache-utilization-scorer
+        weight: 2
+      - pluginRef: max-score-picker
+  - name: decode
+    plugins:
+      - pluginRef: decode-filter
+      - pluginRef: active-request-scorer
+        weight: 2
+      - pluginRef: prefix-cache-scorer
+        weight: 3
+      - pluginRef: max-score-picker
+
+dataLayer:
+  discovery:
+    pluginRef: file-disc
+
+# ---- Per-role vLLM flags ----
+# Common flags (--enable-expert-parallel, --tensor-parallel-size,
+# --data-parallel-size, --kv_transfer_config, --moe-backend) are set in
+# server.sh. Cross-node DP coordination flags are NOT emitted because
+# LWS_GROUP_SIZE = PREFILL_NODES = DECODE_NODES = 1.
+#
+# kv-cache-dtype is left at default (auto). gpt-oss-120b has not been
+# validated with --kv-cache-dtype fp8 in this image; using auto avoids
+# silent KV-quantization mismatches on a smoke test.
+prefill:
+  extra-args: >-
+    --gpu-memory-utilization 0.85
+    --max-num-batched-tokens 16384
+    --max-num-seqs 16
+    --max-model-len 16384
+    --block-size 256
+    --no-enable-prefix-caching
+  env: {}
+
+decode:
+  extra-args: >-
+    --gpu-memory-utilization 0.90
+    --max-num-batched-tokens 256
+    --max-num-seqs 256
+    --max-model-len 16384
+    --block-size 256
+    --no-enable-prefix-caching
+  env: {}
+
+# ---- SLURM resource directives ----
+slurm:
+  time_limit: "04:00:00"

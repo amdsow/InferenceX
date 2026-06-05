@@ -11311,3 +11311,41 @@ dsr1-fp8-h200-llm-d-vllm-simple:
           dp-attn: true
           additional-settings:
           - "DECODE_NODES=1"
+
+# llm-d-vllm 1P+1D smoke test on H200 with gpt-oss-120b (MXFP4).
+#
+# Same topology and llm-d scaffolding as dsr1-fp8-h200-llm-d-vllm-simple,
+# but with a much smaller MoE so memory pressure is comfortable on H200.
+# Selectable independently via `--config-keys gptoss-fp4-h200-llm-d-vllm-simple`.
+gptoss-fp4-h200-llm-d-vllm-simple:
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:v0.7.0
+  model: openai/gpt-oss-120b
+  model-prefix: gptoss
+  runner: h200-multinode
+  precision: fp4
+  framework: llm-d-vllm
+  multinode: true
+  disagg: true
+  scenarios:
+    fixed-seq-len:
+    - isl: 1024
+      osl: 1024
+      search-space:
+      - spec-decoding: "none"
+        conc-list: [ 1, 4, 16, 64, 256 ]
+        prefill:
+          num-worker: 1
+          tp: 1
+          ep: 8
+          dp-attn: true
+          additional-settings:
+          - "PREFILL_NODES=1"
+          - "RANDOM_RANGE_RATIO=0.05"
+          - "CONFIG_FILE=gptoss-fp4-h200-1p1d-simple.yaml"
+        decode:
+          num-worker: 1
+          tp: 1
+          ep: 8
+          dp-attn: true
+          additional-settings:
+          - "DECODE_NODES=1"
