@@ -21,18 +21,43 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
             export MODEL_NAME="DeepSeek-R1-0528"
         elif [[ $MODEL_PREFIX == "gptoss" && $PRECISION == "fp4" ]]; then
             # The llm-d job.slurm bind-mounts $MODEL_DIR into /models inside
-            # the container, so MODEL_PATH must be an existing directory on
-            # the host (an HF id will not work without further plumbing).
-            # Stage the model out-of-band (e.g. `huggingface-cli download
-            # openai/gpt-oss-120b --local-dir /models/gpt-oss-120b`) before
-            # running this benchmark.
-            if [[ ! -d "/models/gpt-oss-120b" ]]; then
-                echo "Error: /models/gpt-oss-120b not found on this runner." >&2
-                echo "       Pre-stage the model with:" >&2
-                echo "         huggingface-cli download openai/gpt-oss-120b --local-dir /models/gpt-oss-120b" >&2
-                exit 1
+            # the container, so MODEL_PATH must be an existing host
+            # directory (an HF id alone will not work). Resolution order:
+            #   1. /models/gpt-oss-120b (cluster-shared, staged by an admin)
+            #   2. $HOME/inferencex-models/gpt-oss-120b (per-runner, written
+            #      by this script - downloaded once, cached across dispatches)
+            # The download happens inline on the runner host so users with
+            # only gh-dispatch access can stage the model without ssh.
+            GPTOSS_LOCAL_DIR="$HOME/inferencex-models/gpt-oss-120b"
+            if [[ -d "/models/gpt-oss-120b" ]]; then
+                export MODEL_PATH="/models/gpt-oss-120b"
+            else
+                mkdir -p "$HOME/inferencex-models"
+                # flock serializes concurrent dispatches so a second run
+                # waits for the first download to finish instead of racing.
+                (
+                    flock -x 200
+                    if [[ ! -d "$GPTOSS_LOCAL_DIR" ]]; then
+                        echo "Staging openai/gpt-oss-120b -> $GPTOSS_LOCAL_DIR (one-time, ~60 GB)"
+                        if command -v huggingface-cli >/dev/null 2>&1; then
+                            huggingface-cli download openai/gpt-oss-120b \
+                                --local-dir "$GPTOSS_LOCAL_DIR"
+                        elif python3 -c "import huggingface_hub" 2>/dev/null; then
+                            python3 - <<'PY'
+import os
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id="openai/gpt-oss-120b",
+                  local_dir=os.environ["GPTOSS_LOCAL_DIR"])
+PY
+                        else
+                            echo "Error: neither huggingface-cli nor python3 huggingface_hub available." >&2
+                            echo "       Cannot auto-stage gpt-oss-120b on this runner." >&2
+                            exit 1
+                        fi
+                    fi
+                ) 200>"$HOME/inferencex-models/.gpt-oss-120b.download.lock"
+                export MODEL_PATH="$GPTOSS_LOCAL_DIR"
             fi
-            export MODEL_PATH="/models/gpt-oss-120b"
             export MODEL_NAME="gpt-oss-120b"
         else
             echo "Unsupported MODEL_PREFIX/PRECISION for llm-d-vllm on H200: $MODEL_PREFIX/$PRECISION" >&2
