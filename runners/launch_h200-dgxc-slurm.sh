@@ -60,6 +60,15 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
                     if [[ -d "$GPTOSS_LOCAL_DIR" && -n "$(ls -A "$GPTOSS_LOCAL_DIR" 2>/dev/null)" ]]; then
                         exit 0
                     fi
+                    # Earlier dispatches that failed before staging may
+                    # have left an empty $GPTOSS_LOCAL_DIR owned by root,
+                    # because job.slurm's docker run bind-mounts MODEL_DIR
+                    # with --user 0:0 and Docker auto-creates the source
+                    # path when it does not exist. Remove the empty dir so
+                    # `hf download` can recreate it with the right owner.
+                    if [[ -d "$GPTOSS_LOCAL_DIR" ]]; then
+                        rmdir "$GPTOSS_LOCAL_DIR" 2>/dev/null || true
+                    fi
                     echo "Staging openai/gpt-oss-120b -> $GPTOSS_LOCAL_DIR (one-time, ~60 GB)"
                     ensure_hf_cli
                     hf download openai/gpt-oss-120b --local-dir "$GPTOSS_LOCAL_DIR"
