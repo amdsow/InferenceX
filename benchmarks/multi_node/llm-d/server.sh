@@ -342,8 +342,16 @@ PY
         # (job.slurm bind-mounts $DI_REPO_DIR onto /workspace). Without it
         # run_benchmark_serving falls back to $(pwd), which on this image
         # is /home/vllm and does not contain utils/bench_serving/.
+        #
+        # --tokenizer points at /models (the in-container bind-mount of
+        # MODEL_DIR). bench_serving.py loads a tokenizer locally for prompt
+        # tokenization; without --tokenizer it derives one from --model,
+        # but --model here is the *served-model-name* ("gpt-oss-120b",
+        # "DeepSeek-R1-0528"), which is not a valid HF repo id - it would
+        # try to fetch from huggingface.co and 401.
         run_benchmark_serving \
             --bench-serving-dir /workspace \
+            --tokenizer /models \
             --model "$MODEL_NAME" \
             --port "$ENVOY_PORT" \
             --backend openai \
