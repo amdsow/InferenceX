@@ -1,0 +1,139 @@
+# DeepSeek-V4-Pro (FP4) on GB200, simple 1P+1D P/D disagg via llm-d-vllm.
+#
+# Sibling of gptoss-fp4-h200-1p1d-simple.yaml. Same llm-d-vllm
+# scaffolding (EPP plugins/profiles/dataLayer + per-role extra-args)
+# but on GB200 NVL72 with the DSV4-Pro topology that mirrors
+# dsv4-fp4-gb200-dynamo-vllm 1P+1D conc=1 (and the upstream NVIDIA
+# srt-slurm recipe disagg-gb200-low-latency.yaml the dynamo path
+# tracks). Goal: same workload as the dynamo-vllm GB200 number, served
+# by the InferenceX llm-d-vllm path, so the two are directly
+# comparable on the same SKU + model + bench.
+#
+# Topology (GB200 = 4 GPUs/node):
+#   Prefill: 1 worker, 8 GPUs across 2 nodes (LWS_GROUP_SIZE=2),
+#            TP=1 DP=8 EP=8 (DP-attention, intra-rack NVL all-to-all)
+#   Decode:  1 worker, 8 GPUs across 2 nodes (LWS_GROUP_SIZE=2),
+#            TP=8 DP=1 EP=1 (pure tensor parallel, FULL_DECODE_ONLY graphs)
+#   Total:   4 GB200 nodes / 16 GPUs.
+#
+# Selected via additional-settings: CONFIG_FILE=dsv4-fp4-gb200-1p1d-simple.yaml
+# with PREFILL_NODES=2 DECODE_NODES=2 GPUS_PER_NODE=4 from the wrapper.
+
+# ---- EPP scheduling config ----
+# Identical to gptoss-fp4-h200-1p1d-simple.yaml. Plugins, profiles,
+# scorer weights are model-agnostic - they govern routing, not engine
+# config.
+apiVersion: llm-d.ai/v1alpha1
+kind: EndpointPickerConfig
+
+plugins:
+  - name: file-disc
+    type: file-discovery
+    parameters:
+      path: /tmp/endpoints.yaml
+      watchFile: false
+
+  - type: disagg-headers-handler
+  - type: always-disagg-pd-decider
+  - type: disagg-profile-handler
+    parameters:
+      deciderPluginName: always-disagg-pd-decider
+  - type: prefill-filter
+  - type: decode-filter
+  - type: prefix-cache-scorer
+  - type: queue-scorer
+  - type: kv-cache-utilization-scorer
+  - type: active-request-scorer
+  - type: max-score-picker
+
+schedulingProfiles:
+  - name: prefill
+    plugins:
+      - pluginRef: prefill-filter
+      - pluginRef: prefix-cache-scorer
+        weight: 3
+      - pluginRef: queue-scorer
+        weight: 2
+      - pluginRef: kv-cache-utilization-scorer
+        weight: 2
+      - pluginRef: max-score-picker
+  - name: decode
+    plugins:
+      - pluginRef: decode-filter
+      - pluginRef: active-request-scorer
+        weight: 2
+      - pluginRef: prefix-cache-scorer
+        weight: 3
+      - pluginRef: max-score-picker
+
+dataLayer:
+  discovery:
+    pluginRef: file-disc
+
+# ---- Per-role vLLM flags ----
+# extra-args + env mirror the upstream NVIDIA srt-slurm recipe for the
+# dynamo-vllm path on this same SKU/topology, vendored at
+# benchmarks/multi_node/srt-slurm-recipes/vllm/deepseek-v4/8k1k/disagg-gb200-low-latency.yaml.
+# Keeping the engine config aligned across frameworks is what makes the
+# llm-d-vllm vs dynamo-vllm comparison meaningful.
+#
+# tp / enable-expert-parallel are read by server.sh and become
+# --tensor-parallel-size and --enable-expert-parallel/--data-parallel-size
+# decisions. The other flags pass through verbatim via extra-args.
+prefill:
+  tp: 1
+  enable-expert-parallel: true
+  extra-args: >-
+    --kv-cache-dtype fp8
+    --max-model-len 16384
+    --max-num-seqs 16
+    --max-num-batched-tokens 32768
+    --enforce-eager
+    --gpu-memory-utilization 0.8
+    --no-enable-prefix-caching
+    --no-enable-flashinfer-autotune
+    --no-async-scheduling
+    --block-size 256
+    --tokenizer-mode deepseek_v4
+  env:
+    NCCL_CUMEM_ENABLE: "1"
+    NCCL_MNNVL_ENABLE: "1"
+    NCCL_NVLS_ENABLE: "1"
+    NCCL_P2P_LEVEL: "NVL"
+    UCX_MEMTYPE_CACHE: "n"
+    UCX_MEMTYPE_REG_WHOLE: "n"
+    UCX_TLS: "cuda_copy,cuda_ipc,tcp"
+    UCX_CUDA_IPC_ENABLE_MNNVL: "y"
+    VLLM_USE_NCCL_SYMM_MEM: "1"
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "1024"
+    VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE: "2048"
+
+decode:
+  tp: 8
+  enable-expert-parallel: false
+  extra-args: >-
+    --kv-cache-dtype fp8
+    --max-model-len 16384
+    --max-num-seqs 256
+    --max-num-batched-tokens 256
+    --gpu-memory-utilization 0.9
+    --no-enable-prefix-caching
+    --no-enable-flashinfer-autotune
+    --block-size 256
+    --compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}
+    --stream-interval 50
+    --tokenizer-mode deepseek_v4
+  env:
+    NCCL_CUMEM_ENABLE: "1"
+    NCCL_MNNVL_ENABLE: "1"
+    NCCL_NVLS_ENABLE: "1"
+    NCCL_P2P_LEVEL: "NVL"
+    UCX_MEMTYPE_CACHE: "n"
+    UCX_MEMTYPE_REG_WHOLE: "n"
+    UCX_TLS: "cuda_copy,cuda_ipc,tcp"
+    UCX_CUDA_IPC_ENABLE_MNNVL: "y"
+    VLLM_USE_NCCL_SYMM_MEM: "1"
+
+# ---- SLURM resource directives ----
+slurm:
+  time_limit: "08:00:00"
