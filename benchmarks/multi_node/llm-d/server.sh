@@ -258,6 +258,12 @@ PY
     fi
     echo "EPP config: $EPP_CONFIG"
 
+    # --secure-serving=false: EPP defaults to TLS gRPC; Envoy's `epp`
+    # cluster in benchmarks/llm-d/envoy.yaml is plaintext HTTP/2, so
+    # without this flag every ext_proc dial fails the TLS handshake,
+    # the ext_proc filter trips, and Envoy returns 500 to the bench
+    # client (the local-llmd-run smoke uses --secure-serving=false for
+    # the same reason).
     epp \
         --pool-name=epp \
         --pool-namespace=inferencex \
@@ -265,6 +271,7 @@ PY
         --grpc-port="$EPP_GRPC_PORT" \
         --grpc-health-port="$EPP_HEALTH_PORT" \
         --metrics-port="$EPP_METRICS_PORT" \
+        --secure-serving=false \
         --v=4 \
         > "$EPP_LOG" 2>&1 &
     EPP_PID=$!
