@@ -19,10 +19,17 @@ static_resources:
                 codec_type: AUTO
                 stream_idle_timeout: 0s
                 request_timeout: 0s
+                # Write per-request access logs to their own file so
+                # they survive an SIGTERM-on-failure: when envoy's
+                # stdout is captured via `> envoy.log`, glibc
+                # block-buffers it, and the buffer is lost when srun
+                # SIGTERMs envoy after a failed bench. FileAccessLog
+                # opens its own fd and flushes per record.
                 access_log:
-                  - name: envoy.access_loggers.stdout
+                  - name: envoy.access_loggers.file
                     typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                      path: /benchmark_logs/envoy_access.log
                       log_format:
                         text_format_source:
                           inline_string: >-
