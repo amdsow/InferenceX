@@ -72,12 +72,27 @@ fi
 
 DP_SIZE_LOCAL="$GPUS_PER_NODE"
 START_RANK=$((LWS_WORKER_INDEX * DP_SIZE_LOCAL))
+
+# Defaults preserve the original H200 1P+1D shape: TP=1 + DP=role_total +
+# expert-parallel on. Per-recipe overrides below.
 TP_SIZE=1
+ROLE_ENABLE_EP=true
 
 echo "ROLE=$ROLE DP_SIZE=$DP_SIZE DP_ADDR=$DP_ADDR LWS_WORKER_INDEX=$LWS_WORKER_INDEX START_RANK=$START_RANK"
 
 # ----------------------------------------------------------------
 # Read role-specific extra-args and env from the recipe file.
+#
+# Recipe schema (per-role section, both prefill and decode):
+#   tp:                       int  - --tensor-parallel-size override (default 1)
+#   enable-expert-parallel:   bool - emit --enable-expert-parallel and the
+#                                    DP/wide-EP knobs (default true)
+#   extra-args:               str  - free-form vLLM CLI flags appended at the end
+#   env:                      map  - role-only env vars exported before vllm serve
+#
+# A pure tensor-parallel decode (e.g. DSV4-Pro on GB200: TP=8, no DP, no EP)
+# sets tp:8 and enable-expert-parallel:false. The original gpt-oss recipe
+# omits both keys, so the H200 path is byte-identical.
 # ----------------------------------------------------------------
 ROLE_EXTRA_ARGS=""
 if [[ -n "${CONFIG_FILE:-}" ]]; then
@@ -90,6 +105,12 @@ recipe = yaml.safe_load(open('${RECIPE_PATH}'))
 section = recipe.get('${ROLE}', {}) or {}
 extra = (section.get('extra-args') or '').strip()
 print(f'ROLE_EXTRA_ARGS={extra!r}')
+tp = section.get('tp')
+if tp is not None:
+    print(f'TP_SIZE={int(tp)}')
+ep = section.get('enable-expert-parallel')
+if ep is not None:
+    print(f'ROLE_ENABLE_EP={"true" if ep else "false"}')
 for k, v in (section.get('env') or {}).items():
     print(f'export {k}={v!r}')
 PY
@@ -98,6 +119,7 @@ PY
         echo "WARNING: CONFIG_FILE=$CONFIG_FILE but $RECIPE_PATH not found; using defaults" >&2
     fi
 fi
+echo "Resolved $ROLE TP_SIZE=$TP_SIZE ROLE_ENABLE_EP=$ROLE_ENABLE_EP"
 
 # ----------------------------------------------------------------
 # Multi-node DP / NIXL P/D env: needed in any topology.
@@ -111,9 +133,14 @@ export VLLM_USE_DEEP_GEMM=1
 # libcuda.so.1. In ghcr.io/llm-d/llm-d-cuda the lib lives under
 # /usr/local/cuda/compat/, which is in LD_LIBRARY_PATH (runtime) but
 # NOT in LIBRARY_PATH (link time). Prepend it so ld can resolve
-# -l:libcuda.so.1. The /usr/lib/x86_64-linux-gnu fallback covers
-# NVIDIA Container Toolkit injection paths on Linux hosts.
-export LIBRARY_PATH=/usr/local/cuda/compat:/usr/lib/x86_64-linux-gnu:${LIBRARY_PATH:-}
+# -l:libcuda.so.1. The toolkit-injection fallback path is
+# arch-specific (x86_64-linux-gnu on amd64, aarch64-linux-gnu on
+# Grace/GB200), so resolve it from `uname -m` rather than hardcoding.
+case "$(uname -m)" in
+    aarch64|arm64) _NCT_LIB=/usr/lib/aarch64-linux-gnu ;;
+    *)             _NCT_LIB=/usr/lib/x86_64-linux-gnu ;;
+esac
+export LIBRARY_PATH=/usr/local/cuda/compat:${_NCT_LIB}:${LIBRARY_PATH:-}
 export VLLM_NIXL_SIDE_CHANNEL_HOST="$HOST_IP"
 export VLLM_LOGGING_LEVEL=${VLLM_LOGGING_LEVEL:-INFO}
 
@@ -151,23 +178,32 @@ COMMON_ARGS=(
     --trust-remote-code
     --api-server-count 1
     --disable-access-log-for-endpoints=/health,/metrics
-    --enable-expert-parallel
     --tensor-parallel-size "$TP_SIZE"
-    --data-parallel-size "$DP_SIZE"
     --kv_transfer_config "$KV_TRANSFER_CONFIG"
 )
 # --moe-backend is model-specific (DSR1-FP8 wants deep_gemm, gpt-oss-MXFP4
 # rejects it - see vllm/.../oracle/mxfp4.py:163), so each recipe sets its
 # own value via prefill/decode extra-args instead of inheriting one here.
 
-if [[ "$LWS_GROUP_SIZE" -gt 1 ]]; then
+# Expert-parallel + data-parallel knobs only apply when the recipe asks for
+# DP-attention/EP. Pure tensor-parallel roles (e.g. DSV4-Pro decode TP=8)
+# leave DP at vLLM's default 1 and skip --enable-expert-parallel; emitting
+# --data-parallel-size with TP>1 conflicts with --tensor-parallel-size and
+# vLLM rejects the combination.
+if [[ "$ROLE_ENABLE_EP" == "true" ]]; then
     COMMON_ARGS+=(
-        --data-parallel-hybrid-lb
-        --data-parallel-size-local "$DP_SIZE_LOCAL"
-        --data-parallel-address "$DP_ADDR"
-        --data-parallel-rpc-port 5555
-        --data-parallel-start-rank "$START_RANK"
+        --enable-expert-parallel
+        --data-parallel-size "$DP_SIZE"
     )
+    if [[ "$LWS_GROUP_SIZE" -gt 1 ]]; then
+        COMMON_ARGS+=(
+            --data-parallel-hybrid-lb
+            --data-parallel-size-local "$DP_SIZE_LOCAL"
+            --data-parallel-address "$DP_ADDR"
+            --data-parallel-rpc-port 5555
+            --data-parallel-start-rank "$START_RANK"
+        )
+    fi
 fi
 
 echo "Starting vLLM ($ROLE) DP=$DP_SIZE local=$DP_SIZE_LOCAL start_rank=$START_RANK group_size=$LWS_GROUP_SIZE"
