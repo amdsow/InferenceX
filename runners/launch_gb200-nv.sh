@@ -21,6 +21,13 @@ if [[ "$FRAMEWORK" == "llm-d-vllm" ]]; then
         exit 1
     fi
 
+    # SLURM partition + account: same values the rest of this launcher
+    # uses for the dynamo-* paths below. Setting them here because our
+    # llm-d-vllm branch exits before reaching the file-level export
+    # block, and submit.sh requires both to be present.
+    export SLURM_PARTITION="${SLURM_PARTITION:-batch}"
+    export SLURM_ACCOUNT="${SLURM_ACCOUNT:-benchmark}"
+
     # Logs go to BENCHMARK_LOGS_DIR (NFS-accessible); mirrors H200 path.
     export BENCHMARK_LOGS_DIR="${BENCHMARK_LOGS_DIR:-$GITHUB_WORKSPACE/benchmark_logs}"
     mkdir -p "$BENCHMARK_LOGS_DIR"
