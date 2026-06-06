@@ -8522,6 +8522,52 @@ dsv4-fp4-gb200-dynamo-vllm:
           ep: 8
           dp-attn: true
 
+# llm-d-vllm sibling of dsv4-fp4-gb200-dynamo-vllm 1P+1D conc=1.
+# Same model, same SKU, same topology, same engine config (vLLM 0.22) -
+# different routing/disagg layer (InferenceX llm-d: EPP + Envoy +
+# pd-sidecar + NIXL P/D, no Dynamo/NATS/etcd). Comparison point against
+# the dynamo-vllm number on the same row.
+#
+# Topology mirrors disagg-gb200-low-latency.yaml from
+# benchmarks/multi_node/srt-slurm-recipes/vllm/deepseek-v4/8k1k/:
+#   Prefill: 1 worker, TP=1 EP=8 dp-attn -> 8 GPUs / 2 nodes
+#   Decode:  1 worker, TP=8 (no DP, no EP)  -> 8 GPUs / 2 nodes
+#   Total:   4 GB200 nodes / 16 GPUs.
+dsv4-fp4-gb200-llm-d-vllm:
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:v0.7.0
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: gb200
+  precision: fp4
+  framework: llm-d-vllm
+  multinode: true
+  disagg: true
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 1024
+      search-space:
+      - spec-decoding: "none"
+        conc-list: [1]
+        prefill:
+          num-worker: 1
+          tp: 1
+          ep: 8
+          dp-attn: true
+          additional-settings:
+          - "PREFILL_NODES=2"
+          - "GPUS_PER_NODE=4"
+          - "RANDOM_RANGE_RATIO=0.05"
+          - "CONFIG_FILE=dsv4-fp4-gb200-1p1d-simple.yaml"
+        decode:
+          num-worker: 1
+          tp: 8
+          ep: 1
+          dp-attn: false
+          additional-settings:
+          - "DECODE_NODES=2"
+          - "GPUS_PER_NODE=4"
+
 # MTP2 variant of dsv4-fp4-gb200-dynamo-vllm. Uses the vLLM 0.20.1 image
 # and hand-picked 8k/1k Pareto points mirrored from NVIDIA/srt-slurm.
 dsv4-fp4-gb200-dynamo-vllm-mtp2:
