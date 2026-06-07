@@ -11378,7 +11378,7 @@ gptoss-fp4-h200-llm-d-vllm-simple:
       osl: 1024
       search-space:
       - spec-decoding: "none"
-        conc-list: [ 1, 4, 16, 64, 256 ]
+        conc-list: [ 1, 4, 16, 64, 256, 1024, 4096 ]
         prefill:
           num-worker: 1
           tp: 1
