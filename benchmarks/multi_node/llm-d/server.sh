@@ -36,11 +36,33 @@ EPP_METRICS_PORT=9090
 # served name passed via --served-model-name; it is not part of the
 # filesystem path.
 MODEL="${MODEL_DIR}"
-HOST_IP=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
-# Default NIC for NCCL / Gloo / NVSHMEM bootstrap. Pulled from the same
-# default route HOST_IP came from so the iface and the IP stay
-# consistent across clusters where the routed NIC is not eth0.
-DEFAULT_IFACE=$(ip -o -4 route show to default | awk '{print $5; exit}')
+# Resolve HOST_IP and DEFAULT_IFACE without relying on iproute2 (the
+# `ip` binary is not present in the multi-arch arm64 vLLM base; the
+# amd64 base ships it). python3 is guaranteed inside the vLLM image and
+# its socket library exposes the kernel's source-IP / iface selection.
+_HOST_INFO=$(python3 -c '
+import socket, struct
+def ip_iface_for(dst="1.1.1.1"):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((dst, 80))
+        ip = s.getsockname()[0]
+    finally:
+        s.close()
+    iface = ""
+    try:
+        with open("/proc/net/route") as f:
+            f.readline()  # header
+            for line in f:
+                parts = line.split()
+                if parts[1] == "00000000":  # default route dest
+                    iface = parts[0]; break
+    except OSError:
+        pass
+    print(ip, iface)
+' 2>/dev/null) || true
+HOST_IP=$(echo "$_HOST_INFO" | awk '{print $1}')
+DEFAULT_IFACE=$(echo "$_HOST_INFO" | awk '{print $2}')
 DEFAULT_IFACE="${DEFAULT_IFACE:-eth0}"
 
 VLLM_LOG="/benchmark_logs/vllm_rank${NODE_RANK}.log"
