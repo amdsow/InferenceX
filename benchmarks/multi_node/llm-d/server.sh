@@ -198,11 +198,17 @@ COMMON_ARGS=(
     --port "$VLLM_PORT"
     --served-model-name "$MODEL_NAME"
     --trust-remote-code
-    --api-server-count 1
     --disable-access-log-for-endpoints=/health,/metrics
     --tensor-parallel-size "$TP_SIZE"
     --kv_transfer_config "$KV_TRANSFER_CONFIG"
 )
+# --api-server-count is incompatible with --headless (vllm errors out
+# because no API server runs in headless mode). The headless branch
+# below is the only one that drops this; everywhere else keeps the
+# original count=1 behavior.
+if [[ "$ROLE_ENABLE_EP" == "true" ]] || [[ "$LWS_GROUP_SIZE" -le 1 ]] || [[ "$LWS_WORKER_INDEX" -eq 0 ]]; then
+    COMMON_ARGS+=(--api-server-count 1)
+fi
 # --moe-backend is model-specific (DSR1-FP8 wants deep_gemm, gpt-oss-MXFP4
 # rejects it - see vllm/.../oracle/mxfp4.py:163), so each recipe sets its
 # own value via prefill/decode extra-args instead of inheriting one here.
