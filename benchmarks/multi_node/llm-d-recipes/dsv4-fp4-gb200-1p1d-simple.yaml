@@ -83,6 +83,14 @@ dataLayer:
 prefill:
   tp: 1
   enable-expert-parallel: true
+  # Memory-saver flags from the upstream dsv4 dynamo-vllm GB200 recipe.
+  # Without offload+sleep, each EP rank OOMs during KV cache reservation
+  # (seen in slurm 18364: "Tried to allocate 21.65 GiB. ... 153.62 GiB
+  # allocated, 14.47 GiB free"). DSV4-Pro packs ~100 GB of weights per
+  # rank at EP=8; offload-* moves cold experts to host RAM and prefetches
+  # them per layer group; enable-sleep-mode collapses idle GPU memory;
+  # no-disable-hybrid-kv-cache-manager keeps the smaller manager that
+  # the upstream recipe relies on.
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 16384
@@ -95,6 +103,12 @@ prefill:
     --no-async-scheduling
     --block-size 256
     --tokenizer-mode deepseek_v4
+    --enable-sleep-mode
+    --no-disable-hybrid-kv-cache-manager
+    --numa-bind
+    --offload-group-size 3
+    --offload-num-in-group 1
+    --offload-prefetch-step 2
   env:
     NCCL_CUMEM_ENABLE: "1"
     NCCL_MNNVL_ENABLE: "1"
@@ -111,6 +125,10 @@ prefill:
 decode:
   tp: 8
   enable-expert-parallel: false
+  # Match the upstream dsv4 dynamo-vllm GB200 decode recipe -
+  # enable-sleep-mode + no-disable-hybrid-kv-cache-manager keep memory
+  # in line with the prefill side; offload-* are NOT applied here
+  # (decode TP=8 shards weights, so per-rank memory is far smaller).
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 16384
@@ -123,6 +141,8 @@ decode:
     --compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}
     --stream-interval 50
     --tokenizer-mode deepseek_v4
+    --enable-sleep-mode
+    --no-disable-hybrid-kv-cache-manager
   env:
     NCCL_CUMEM_ENABLE: "1"
     NCCL_MNNVL_ENABLE: "1"
