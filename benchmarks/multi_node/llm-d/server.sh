@@ -41,25 +41,24 @@ MODEL="${MODEL_DIR}"
 # amd64 base ships it). python3 is guaranteed inside the vLLM image and
 # its socket library exposes the kernel's source-IP / iface selection.
 _HOST_INFO=$(python3 -c '
-import socket, struct
-def ip_iface_for(dst="1.1.1.1"):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect((dst, 80))
-        ip = s.getsockname()[0]
-    finally:
-        s.close()
-    iface = ""
-    try:
-        with open("/proc/net/route") as f:
-            f.readline()  # header
-            for line in f:
-                parts = line.split()
-                if parts[1] == "00000000":  # default route dest
-                    iface = parts[0]; break
-    except OSError:
-        pass
-    print(ip, iface)
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    s.connect(("1.1.1.1", 80))
+    ip = s.getsockname()[0]
+finally:
+    s.close()
+iface = ""
+try:
+    with open("/proc/net/route") as f:
+        f.readline()  # header
+        for line in f:
+            parts = line.split()
+            if parts[1] == "00000000":  # default route dest
+                iface = parts[0]; break
+except OSError:
+    pass
+print(ip, iface)
 ' 2>/dev/null) || true
 HOST_IP=$(echo "$_HOST_INFO" | awk '{print $1}')
 DEFAULT_IFACE=$(echo "$_HOST_INFO" | awk '{print $2}')
