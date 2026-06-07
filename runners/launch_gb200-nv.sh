@@ -52,15 +52,33 @@ if [[ "$FRAMEWORK" == "llm-d-vllm" ]]; then
     fi
     SQUASH_FILE="${SQUASH_DIR}/$(echo "$IMAGE" | sed 's/[\/:@#]/_/g').sqsh"
 
-    # enroot import is idempotent against an existing squash file -
-    # imports are pinned to the docker tag/digest, so re-imports cost
-    # only a manifest fetch when the upstream tag has not moved. Force
-    # re-import (-f) if the file is empty (a previous import that was
-    # cancelled mid-flight leaves a 0-byte file).
+    # enroot's docker:// URL uses '#' to separate registry from repo, not
+    # '/' (e.g., 'docker://ghcr.io#ezrasilvera/llm-d-nokube-vllm:v0.7.0').
+    # Without the '#', enroot treats the whole string as a Docker Hub
+    # repo name and the auth handshake hits registry-1.docker.io -> 401.
+    # nvidia-master.yaml stores image: in plain Docker form (works
+    # natively for docker run on the H200 path); we translate here.
+    case "$IMAGE" in
+        */*)
+            _registry="${IMAGE%%/*}"
+            _rest="${IMAGE#*/}"
+            if [[ "$_registry" == *.* || "$_registry" == *:* ]]; then
+                ENROOT_URL="docker://${_registry}#${_rest}"
+            else
+                ENROOT_URL="docker://${IMAGE}"  # bare hub repo
+            fi
+            ;;
+        *)  ENROOT_URL="docker://${IMAGE}" ;;
+    esac
+    echo "ENROOT_URL=$ENROOT_URL"
+
+    # enroot import is idempotent against an existing squash file - it
+    # writes a fresh sqsh, but skips when -o file is non-empty (we gate
+    # on -s so we re-import a 0-byte sqsh from a cancelled run).
     if [[ ! -s "$SQUASH_FILE" ]]; then
         echo "enroot import -> $SQUASH_FILE"
-        enroot import -o "$SQUASH_FILE" "docker://$IMAGE" || {
-            echo "Error: enroot import failed for $IMAGE" >&2
+        enroot import -o "$SQUASH_FILE" "$ENROOT_URL" || {
+            echo "Error: enroot import failed for $ENROOT_URL" >&2
             exit 1
         }
     else
