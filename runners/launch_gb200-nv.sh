@@ -28,6 +28,48 @@ if [[ "$FRAMEWORK" == "llm-d-vllm" ]]; then
     export SLURM_PARTITION="${SLURM_PARTITION:-batch}"
     export SLURM_ACCOUNT="${SLURM_ACCOUNT:-benchmark}"
 
+    # Container engine: GB200 SLURM users do not have access to the
+    # docker daemon socket, so the H200's `docker run` path fails with
+    # "permission denied while trying to connect to the docker API at
+    # unix:///var/run/docker.sock". Use pyxis srun --container-image=
+    # against an enroot-imported squash file, mirroring how the dynamo
+    # paths below run their containers.
+    SQUASH_DIR=""
+    for cand in \
+        /mnt/lustre01/users-public/sa-shared \
+        /mnt/lustre01/users/slurm-shared/squash \
+        /home/slurm-shared/gharunners/squash \
+        ; do
+        if mkdir -p "$cand" 2>/dev/null && touch "$cand/.write-probe.$$" 2>/dev/null; then
+            rm -f "$cand/.write-probe.$$" 2>/dev/null
+            SQUASH_DIR="$cand"
+            break
+        fi
+    done
+    if [[ -z "$SQUASH_DIR" ]]; then
+        echo "Error: no writable squash dir candidate found on this cluster" >&2
+        exit 1
+    fi
+    SQUASH_FILE="${SQUASH_DIR}/$(echo "$IMAGE" | sed 's/[\/:@#]/_/g').sqsh"
+
+    # enroot import is idempotent against an existing squash file -
+    # imports are pinned to the docker tag/digest, so re-imports cost
+    # only a manifest fetch when the upstream tag has not moved. Force
+    # re-import (-f) if the file is empty (a previous import that was
+    # cancelled mid-flight leaves a 0-byte file).
+    if [[ ! -s "$SQUASH_FILE" ]]; then
+        echo "enroot import -> $SQUASH_FILE"
+        enroot import -o "$SQUASH_FILE" "docker://$IMAGE" || {
+            echo "Error: enroot import failed for $IMAGE" >&2
+            exit 1
+        }
+    else
+        echo "Reusing existing squash: $SQUASH_FILE"
+    fi
+
+    export LLMD_CONTAINER_ENGINE=pyxis
+    export LLMD_SQUASH_FILE="$SQUASH_FILE"
+
     # Logs go to BENCHMARK_LOGS_DIR (NFS-accessible); mirrors H200 path.
     export BENCHMARK_LOGS_DIR="${BENCHMARK_LOGS_DIR:-$GITHUB_WORKSPACE/benchmark_logs}"
     mkdir -p "$BENCHMARK_LOGS_DIR"
