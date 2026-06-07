@@ -93,7 +93,7 @@ prefill:
   # the upstream recipe relies on.
   extra-args: >-
     --kv-cache-dtype fp8
-    --max-model-len 16384
+    --max-model-len 12288
     --max-num-seqs 16
     --max-num-batched-tokens 32768
     --enforce-eager
@@ -131,7 +131,7 @@ decode:
   # (decode TP=8 shards weights, so per-rank memory is far smaller).
   extra-args: >-
     --kv-cache-dtype fp8
-    --max-model-len 16384
+    --max-model-len 12288
     --max-num-seqs 256
     --max-num-batched-tokens 256
     --gpu-memory-utilization 0.9
