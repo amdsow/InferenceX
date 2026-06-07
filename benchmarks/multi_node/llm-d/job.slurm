@@ -78,12 +78,21 @@ rm -f "$BENCH_DONE_MARKER"
 ) &
 WATCHER_PID=$!
 
-# One docker run per node, one task per node. server.sh dispatches by NODE_RANK.
-srun \
-    --kill-on-bad-exit=1 \
-    --signal=TERM@30 \
-    --unbuffered \
-    bash -lc "
+# Container engine: 'docker' (default) for clusters where the SLURM
+# user can talk to /var/run/docker.sock (e.g. h200-dgxc-slurm); 'pyxis'
+# for clusters that require enroot+pyxis srun (e.g. gb200-nv, where the
+# SLURM user is not in the docker group). Same env contract on both
+# paths; only the per-node container launch differs.
+LLMD_CONTAINER_ENGINE="${LLMD_CONTAINER_ENGINE:-docker}"
+echo "LLMD_CONTAINER_ENGINE=$LLMD_CONTAINER_ENGINE"
+
+if [[ "$LLMD_CONTAINER_ENGINE" == "docker" ]]; then
+    # One docker run per node, one task per node. server.sh dispatches by NODE_RANK.
+    srun \
+        --kill-on-bad-exit=1 \
+        --signal=TERM@30 \
+        --unbuffered \
+        bash -lc "
 set -euo pipefail
 echo \"Rank \$SLURM_PROCID on \$(hostname)\"
 
@@ -149,4 +158,67 @@ exec docker run --rm \
     '
 "
 
-srun bash -c "docker ps -aq --filter name=\"^${DOCKER_CONT_NAME}_\" | xargs -r docker rm -f" || true
+    srun bash -c "docker ps -aq --filter name=\"^${DOCKER_CONT_NAME}_\" | xargs -r docker rm -f" || true
+
+elif [[ "$LLMD_CONTAINER_ENGINE" == "pyxis" ]]; then
+    : "${LLMD_SQUASH_FILE:?LLMD_SQUASH_FILE must be set when LLMD_CONTAINER_ENGINE=pyxis}"
+    if [[ ! -s "$LLMD_SQUASH_FILE" ]]; then
+        echo "Error: LLMD_SQUASH_FILE does not exist or is empty: $LLMD_SQUASH_FILE" >&2
+        exit 1
+    fi
+
+    # Pre-export non-SLURM static vars so pyxis --container-env=
+    # whitelisting can pick them up. Vars that already come from submit.sh
+    # via export are no-ops here; we re-state them for clarity. ALL_IPS
+    # is computed locally above as $ALL_IP_LIST.
+    export ALL_IPS="$ALL_IP_LIST"
+    export NUM_NODES PREFILL_NODES DECODE_NODES PREFILL_LEADER_IP DECODE_LEADER_IP
+    export PREFILL_DP_ADDR DECODE_DP_ADDR MODEL_NAME GPUS_PER_NODE
+    export PREFILL_DP_SIZE DECODE_DP_SIZE
+    export BENCH_INPUT_LEN BENCH_OUTPUT_LEN BENCH_MAX_CONCURRENCY
+    export BENCH_REQUEST_RATE BENCH_RANDOM_RANGE_RATIO BENCH_NUM_PROMPTS_MULTIPLIER
+    export RUN_EVAL EVAL_ONLY EVAL_CONC FRAMEWORK PRECISION MODEL_PREFIX
+    export RUNNER_TYPE RESULT_FILENAME SPEC_DECODING IS_MULTINODE CONFIG_FILE
+
+    PYXIS_ENV_LIST="NUM_NODES,PREFILL_NODES,DECODE_NODES,ALL_IPS,PREFILL_LEADER_IP,DECODE_LEADER_IP"
+    PYXIS_ENV_LIST+=",PREFILL_DP_ADDR,DECODE_DP_ADDR,MODEL_NAME,GPUS_PER_NODE"
+    PYXIS_ENV_LIST+=",PREFILL_DP_SIZE,DECODE_DP_SIZE"
+    PYXIS_ENV_LIST+=",BENCH_INPUT_LEN,BENCH_OUTPUT_LEN,BENCH_MAX_CONCURRENCY"
+    PYXIS_ENV_LIST+=",BENCH_REQUEST_RATE,BENCH_RANDOM_RANGE_RATIO,BENCH_NUM_PROMPTS_MULTIPLIER"
+    PYXIS_ENV_LIST+=",RUN_EVAL,EVAL_ONLY,EVAL_CONC,FRAMEWORK,PRECISION,MODEL_PREFIX"
+    PYXIS_ENV_LIST+=",RUNNER_TYPE,RESULT_FILENAME,SPEC_DECODING,IS_MULTINODE,CONFIG_FILE"
+
+    PYXIS_MOUNTS="${MODEL_DIR}:/models:ro"
+    PYXIS_MOUNTS+=",${BENCHMARK_LOGS_DIR}:/benchmark_logs"
+    PYXIS_MOUNTS+=",${DI_REPO_DIR}:${DOCKER_MOUNT_PATH}"
+    PYXIS_MOUNTS+=",${DI_REPO_DIR}/benchmarks/multi_node/llm-d-recipes:/etc/llmd-recipes:ro"
+    PYXIS_MOUNTS+=",${DI_REPO_DIR}/benchmarks/llm-d/epp-config.yaml:/etc/epp/config.yaml:ro"
+    PYXIS_MOUNTS+=",${DI_REPO_DIR}/benchmarks/llm-d/envoy.yaml:/etc/envoy/envoy.yaml:ro"
+
+    # MODEL_DIR / BENCHMARK_LOGS_DIR / NODE_RANK are translated to their
+    # in-container values inside bash -lc (host MODEL_DIR is the source
+    # path of the bind mount, but server.sh expects /models inside).
+    srun \
+        --kill-on-bad-exit=1 \
+        --signal=TERM@30 \
+        --unbuffered \
+        --container-image="$LLMD_SQUASH_FILE" \
+        --container-name="${DOCKER_CONT_NAME}" \
+        --container-mounts="$PYXIS_MOUNTS" \
+        --container-remap-root \
+        --container-writable \
+        --container-env="$PYXIS_ENV_LIST" \
+        bash -lc '
+set -o pipefail
+echo "Rank $SLURM_PROCID on $(hostname)"
+export NODE_RANK="$SLURM_PROCID"
+export MODEL_DIR=/models
+export BENCHMARK_LOGS_DIR=/benchmark_logs
+'"$DOCKER_MOUNT_PATH"'/benchmarks/multi_node/llm-d/server.sh \
+    2>&1 | tee /benchmark_logs/slurm_job-${SLURM_JOB_ID}_rank_${SLURM_PROCID}.log
+'
+
+else
+    echo "Unsupported LLMD_CONTAINER_ENGINE: $LLMD_CONTAINER_ENGINE (expected docker|pyxis)" >&2
+    exit 1
+fi
