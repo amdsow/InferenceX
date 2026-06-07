@@ -226,6 +226,23 @@ if [[ "$ROLE_ENABLE_EP" == "true" ]]; then
             --data-parallel-start-rank "$START_RANK"
         )
     fi
+elif [[ "$LWS_GROUP_SIZE" -gt 1 ]]; then
+    # Pure tensor-parallel that spans more than one node (e.g. DSV4-Pro
+    # decode TP=8 on GB200's 4-GPU nodes). vLLM rejects TP > GPUs/node
+    # without explicit cross-node coordination. We use vLLM's native
+    # headless multi-node API - the same mechanism dynamo's vllm
+    # launcher uses (NVIDIA/srt-slurm src/srtctl/backends/vllm.py):
+    # leader rank-0 binds on --master-addr, followers join headless
+    # with matching --nnodes/--node-rank. PyTorch distributed handles
+    # the NCCL rendezvous.
+    COMMON_ARGS+=(
+        --master-addr "$DP_ADDR"
+        --nnodes "$LWS_GROUP_SIZE"
+        --node-rank "$LWS_WORKER_INDEX"
+    )
+    if [[ "$LWS_WORKER_INDEX" -gt 0 ]]; then
+        COMMON_ARGS+=(--headless)
+    fi
 fi
 
 echo "Starting vLLM ($ROLE) DP=$DP_SIZE local=$DP_SIZE_LOCAL start_rank=$START_RANK group_size=$LWS_GROUP_SIZE"
