@@ -79,8 +79,9 @@ prefill:
   extra-args: >-
     --gpu-memory-utilization 0.85
     --max-num-batched-tokens 16384
-    --max-num-seqs 16
+    --max-num-seqs 64
     --max-model-len 4096
+    --max-cudagraph-capture-size 2048
     --block-size 256
     --no-enable-prefix-caching
     --moe-backend triton
@@ -92,6 +93,7 @@ decode:
     --max-num-batched-tokens 4096
     --max-num-seqs 4096
     --max-model-len 4096
+    --max-cudagraph-capture-size 2048
     --block-size 256
     --no-enable-prefix-caching
     --moe-backend triton
