@@ -100,6 +100,7 @@ docker ps -aq --filter name=\"^${DOCKER_CONT_NAME}_\" | xargs -r docker rm -f ||
 
 exec docker run --rm \
     --init \
+    --entrypoint bash \
     --stop-timeout 10 \
     --user 0:0 \
     --network host \
