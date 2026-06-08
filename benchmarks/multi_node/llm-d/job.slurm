@@ -152,7 +152,7 @@ exec docker run --rm \
     -e IS_MULTINODE=$IS_MULTINODE \
     -e CONFIG_FILE=$CONFIG_FILE \
     --name \"${DOCKER_CONT_NAME}_\$SLURM_PROCID\" \
-    \"\$DOCKER_IMAGE_NAME\" bash -lc '
+    \"\$DOCKER_IMAGE_NAME\" -lc '
         set -o pipefail
         ${DOCKER_MOUNT_PATH}/benchmarks/multi_node/llm-d/server.sh \
             2>&1 | tee /benchmark_logs/slurm_job-'\"\$SLURM_JOB_ID\"'_rank_'\"\$SLURM_PROCID\"'.log
