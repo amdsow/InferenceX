@@ -78,8 +78,8 @@ dataLayer:
 prefill:
   extra-args: >-
     --gpu-memory-utilization 0.85
-    --max-num-batched-tokens 16384
-    --max-num-seqs 64
+    --max-num-batched-tokens 32768
+    --max-num-seqs 128
     --max-model-len 4096
     --max-cudagraph-capture-size 2048
     --block-size 256
