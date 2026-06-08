@@ -165,6 +165,17 @@ export LIBRARY_PATH=/usr/local/cuda/compat:${_NCT_LIB}:${LIBRARY_PATH:-}
 export VLLM_NIXL_SIDE_CHANNEL_HOST="$HOST_IP"
 export VLLM_LOGGING_LEVEL=${VLLM_LOGGING_LEVEL:-INFO}
 
+# Force NIXL/UCX onto IB verbs (Reliable-Connected) and turn on UCX +
+# NCCL transport-selection logging so vllm_rank*.log records the chosen
+# wire transport per endpoint. cuda_copy/cuda_ipc cover intra-node H2D
+# and peer-GPU paths; rc covers cross-node KV via the IB HCAs that
+# job.slurm exposes with --device /dev/infiniband + IPC_LOCK. Mirrors
+# the dynamo minimax recipes (UCX_TLS=cuda_copy,rc).
+export UCX_TLS=${UCX_TLS:-cuda_copy,cuda_ipc,rc}
+export UCX_LOG_LEVEL=${UCX_LOG_LEVEL:-info}
+export NCCL_DEBUG=${NCCL_DEBUG:-INFO}
+export NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS:-INIT,NET,ENV}
+
 # ----------------------------------------------------------------
 # Wide-EP NVSHMEM / ibgda env (from the llm-d wide-EP-lws guide
 # manifests). Gated on LWS_GROUP_SIZE > 1 - the simple 1P+1D recipe
