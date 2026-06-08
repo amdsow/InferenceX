@@ -11395,3 +11395,46 @@ gptoss-fp4-h200-llm-d-vllm-simple:
           dp-attn: true
           additional-settings:
           - "DECODE_NODES=1"
+
+# llm-d-vllm 2P+1D variant of the H200 gpt-oss-120b sweep.
+#
+# Same recipe (engine flags) as the 1P+1D entry above, but the matrix expansion
+# sets PREFILL_NODES=2 so submit.sh allocates 3 nodes total. With LWS_GROUP_SIZE=2
+# on the prefill role, server.sh auto-activates vLLM cross-node DP coordination
+# (--data-parallel-hybrid-lb + --data-parallel-address + --data-parallel-start-rank)
+# and the wide-EP NVSHMEM/ibgda env. Decode stays single-node.
+#
+# Total: 24 H200 (16 prefill + 8 decode). Selectable via
+# `--config-keys gptoss-fp4-h200-llm-d-vllm-2p1d`.
+gptoss-fp4-h200-llm-d-vllm-2p1d:
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:v0.7.0
+  model: openai/gpt-oss-120b
+  model-prefix: gptoss
+  runner: h200-multinode
+  precision: fp4
+  framework: llm-d-vllm
+  multinode: true
+  disagg: true
+  scenarios:
+    fixed-seq-len:
+    - isl: 1024
+      osl: 1024
+      search-space:
+      - spec-decoding: "none"
+        conc-list: [ 1, 4, 16, 64, 256, 1024, 2048 ]
+        prefill:
+          num-worker: 2
+          tp: 1
+          ep: 8
+          dp-attn: true
+          additional-settings:
+          - "PREFILL_NODES=2"
+          - "RANDOM_RANGE_RATIO=0.05"
+          - "CONFIG_FILE=gptoss-fp4-h200-1p1d-simple.yaml"
+        decode:
+          num-worker: 1
+          tp: 1
+          ep: 8
+          dp-attn: true
+          additional-settings:
+          - "DECODE_NODES=1"
