@@ -218,6 +218,7 @@ run_benchmark_serving() {
     local trust_remote_code=false
     local server_pid=""
     local tokenizer=""
+    local tokenizer_mode=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -288,6 +289,10 @@ run_benchmark_serving() {
                 ;;
             --tokenizer)
                 tokenizer="$2"
+                shift 2
+                ;;
+            --tokenizer-mode)
+                tokenizer_mode="$2"
                 shift 2
                 ;;
             *)
@@ -399,6 +404,10 @@ run_benchmark_serving() {
 
     if [[ -n "$tokenizer" ]]; then
         benchmark_cmd+=(--tokenizer "$tokenizer")
+    fi
+
+    if [[ -n "$tokenizer_mode" ]]; then
+        benchmark_cmd+=(--tokenizer-mode "$tokenizer_mode")
     fi
 
     # Run benchmark with optional server monitoring
