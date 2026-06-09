@@ -13,7 +13,8 @@
 # iteration does not require an image rebuild. See
 # benchmarks/multi_node/llm-d/job.slurm for the expected mount layout.
 
-FROM vllm/vllm-openai:v0.22.0
+ARG VLLM_BASE=vllm/vllm-openai:v0.22.0
+FROM ${VLLM_BASE}
 
 COPY --from=ghcr.io/llm-d/llm-d-router-endpoint-picker-dev:main \
        /app/epp /usr/local/bin/epp

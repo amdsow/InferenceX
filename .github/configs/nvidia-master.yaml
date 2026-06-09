@@ -8534,7 +8534,11 @@ dsv4-fp4-gb200-dynamo-vllm:
 #   Decode:  1 worker, TP=8 (no DP, no EP)  -> 8 GPUs / 2 nodes
 #   Total:   4 GB200 nodes / 16 GPUs.
 dsv4-fp4-gb200-llm-d-vllm:
-  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:v0.7.0
+  # vLLM 0.20.0 base (matches dsv4-fp4-gb200-dynamo-vllm) to side-step the
+  # vLLM 0.22 + cutlass-dsl `cute.arch.fmin` mismatch on DSV4 sparse
+  # attention. Pinning to the same vLLM version as the dynamo-vllm path
+  # also makes the llm-d-vllm vs dynamo-vllm comparison cleaner.
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:vllm0.20
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
   runner: gb200
@@ -8559,6 +8563,8 @@ dsv4-fp4-gb200-llm-d-vllm:
           - "GPUS_PER_NODE=4"
           - "RANDOM_RANGE_RATIO=0.05"
           - "CONFIG_FILE=dsv4-fp4-gb200-1p1d-simple.yaml"
+          - "BENCH_NUM_PROMPTS_MULTIPLIER=3"
+          - "MAX_FAILURE_RATE=0.5"
         decode:
           num-worker: 1
           tp: 8
