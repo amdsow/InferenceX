@@ -8534,13 +8534,15 @@ dsv4-fp4-gb200-dynamo-vllm:
 #   Decode:  1 worker, TP=8 (no DP, no EP)  -> 8 GPUs / 2 nodes
 #   Total:   4 GB200 nodes / 16 GPUs.
 dsv4-fp4-gb200-llm-d-vllm:
-  # vLLM 0.22 base + cutlass-dsl upgrade. Without the upgrade, DSV4
-  # sparse-attention code in vLLM 0.22 calls cute.arch.fmin which the
-  # bundled cutlass-dsl wheel lacks. Same vLLM version every other
-  # working DSV4-with-our-bench test in this repo runs on (b200, b300,
-  # mi355x, h200), which keeps the bench-side HF AutoTokenizer path
-  # happy (the v0.20 transformers wheel does not register deepseek_v4).
-  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:v0.22.0-cutlass-dsl
+  # vLLM 0.20.0 base. v0.22 hits AttributeError: cutlass.cute.arch has no
+  # attribute fmin on DSV4 sparse attention, and pip upgrading
+  # nvidia-cutlass-dsl on top does not provide fmin (the working version
+  # is pulled in by NVIDIA/srt-slurm's vllm-container-deps.sh + dynamo
+  # wheel, which we don't replicate here). v0.20.0 reaches "Application
+  # startup complete" cleanly; the only remaining issue was bench-side
+  # tokenization, fixed by routing tokenizer_mode=deepseek_v4 through
+  # vLLM's wrapper instead of stock HF AutoTokenizer.
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:vllm0.20
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
   runner: gb200
