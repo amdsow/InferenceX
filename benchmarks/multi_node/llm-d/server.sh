@@ -448,6 +448,17 @@ PY
         # but --model here is the *served-model-name* ("gpt-oss-120b",
         # "DeepSeek-R1-0528"), which is not a valid HF repo id - it would
         # try to fetch from huggingface.co and 401.
+        # DSV4-Pro needs trust-remote-code so HF AutoTokenizer reads the
+        # checkpoint's bundled configuration_deepseek_v4.py (the older
+        # transformers wheel in vllm/vllm-openai:v0.20.0-ubuntu2404 does
+        # not register `deepseek_v4` natively), plus --use-chat-template
+        # and --dsv4 to match the prompt formatting the dynamo-vllm sa-bench
+        # path uses for the same workload.
+        bench_extra_args=()
+        if [[ "${MODEL_NAME,,}" == *"deepseek-v4"* ]]; then
+            bench_extra_args+=(--trust-remote-code --use-chat-template --dsv4)
+        fi
+
         run_benchmark_serving \
             --bench-serving-dir /workspace \
             --tokenizer /models \
@@ -460,7 +471,8 @@ PY
             --num-prompts "$num_prompts" \
             --max-concurrency "$max_concurrency" \
             --result-filename "${RESULT_FILENAME}_c${max_concurrency}" \
-            --result-dir "$BENCHMARK_LOGS_DIR/"
+            --result-dir "$BENCHMARK_LOGS_DIR/" \
+            "${bench_extra_args[@]}"
     done
 
     if [[ "${RUN_EVAL:-false}" == "true" ]]; then
