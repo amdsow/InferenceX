@@ -456,7 +456,17 @@ PY
         # path uses for the same workload.
         bench_extra_args=()
         if [[ "${MODEL_NAME,,}" == *"deepseek-v4"* ]]; then
-            bench_extra_args+=(--trust-remote-code --use-chat-template --dsv4)
+            # --tokenizer-mode deepseek_v4 routes _load_tokenizer in
+            # benchmark_serving.py through vLLM's get_tokenizer wrapper
+            # (which has DSV4-aware code), bypassing stock HF AutoTokenizer
+            # whose transformers wheel on the v0.20.0 base does not register
+            # the deepseek_v4 model type.
+            bench_extra_args+=(
+                --trust-remote-code
+                --tokenizer-mode deepseek_v4
+                --use-chat-template
+                --dsv4
+            )
         fi
 
         run_benchmark_serving \
