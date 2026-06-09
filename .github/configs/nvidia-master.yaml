@@ -8534,11 +8534,13 @@ dsv4-fp4-gb200-dynamo-vllm:
 #   Decode:  1 worker, TP=8 (no DP, no EP)  -> 8 GPUs / 2 nodes
 #   Total:   4 GB200 nodes / 16 GPUs.
 dsv4-fp4-gb200-llm-d-vllm:
-  # vLLM 0.20.0 base (matches dsv4-fp4-gb200-dynamo-vllm) to side-step the
-  # vLLM 0.22 + cutlass-dsl `cute.arch.fmin` mismatch on DSV4 sparse
-  # attention. Pinning to the same vLLM version as the dynamo-vllm path
-  # also makes the llm-d-vllm vs dynamo-vllm comparison cleaner.
-  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:vllm0.20
+  # vLLM 0.22 base + cutlass-dsl upgrade. Without the upgrade, DSV4
+  # sparse-attention code in vLLM 0.22 calls cute.arch.fmin which the
+  # bundled cutlass-dsl wheel lacks. Same vLLM version every other
+  # working DSV4-with-our-bench test in this repo runs on (b200, b300,
+  # mi355x, h200), which keeps the bench-side HF AutoTokenizer path
+  # happy (the v0.20 transformers wheel does not register deepseek_v4).
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:v0.22.0-cutlass-dsl
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
   runner: gb200

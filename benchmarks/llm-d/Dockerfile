@@ -15,6 +15,10 @@
 
 ARG VLLM_BASE=vllm/vllm-openai:v0.22.0
 FROM ${VLLM_BASE}
+# Force-upgrade nvidia-cutlass-dsl so the DSV4 sparse-attention code in
+# vLLM v0.22 finds cute.arch.fmin (the bundled wheel lacks it).
+RUN pip install --no-cache-dir --upgrade nvidia-cutlass-dsl
+
 
 COPY --from=ghcr.io/llm-d/llm-d-router-endpoint-picker-dev:main \
        /app/epp /usr/local/bin/epp
