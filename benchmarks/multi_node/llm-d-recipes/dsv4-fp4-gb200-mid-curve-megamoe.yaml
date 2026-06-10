@@ -1,0 +1,161 @@
+# DeepSeek-V4-Pro (FP4) on GB200, MegaMOE mid-curve 1P+1D P/D disagg via
+# llm-d-vllm. Sibling of dsv4-fp4-gb200-1p1d-simple.yaml; same number of
+# nodes, different engine config.
+#
+# Mirrors topology #3 from dsv4-fp4-gb200-dynamo-vllm
+# (search-space conc-list [256, 512, 1024]) and the upstream NVIDIA
+# srt-slurm recipe at
+# benchmarks/multi_node/srt-slurm-recipes/vllm/deepseek-v4/8k1k/disagg-gb200-mid-curve-megamoe.yaml.
+# Goal: apples-to-apples llm-d-vllm vs dynamo-vllm at the same
+# concurrency points on the same SKU + model + bench, with both sides
+# running DEP=8 on prefill AND decode (the "MegaMOE" mid-curve shape).
+#
+# Topology (GB200 = 4 GPUs/node):
+#   Prefill: 1 worker, 8 GPUs across 2 nodes (LWS_GROUP_SIZE=2),
+#            TP=1 DP=8 EP=8 (DP-attention, deep_gemm_mega_moe,
+#            EP weight filter).
+#   Decode:  1 worker, 8 GPUs across 2 nodes (LWS_GROUP_SIZE=2),
+#            TP=1 DP=8 EP=8 (DP-attention, deep_gemm_mega_moe,
+#            EP weight filter, FULL_DECODE_ONLY graphs).
+#   Total:   4 GB200 nodes / 16 GPUs (no infra/etcd node, llm-d does
+#            not need NATS/etcd; the dynamo-vllm sibling spends 5 nodes
+#            because its infra node is dedicated).
+#
+# Selected via additional-settings:
+#   CONFIG_FILE=dsv4-fp4-gb200-mid-curve-megamoe.yaml
+#   PREFILL_NODES=2 DECODE_NODES=2 GPUS_PER_NODE=4
+
+# ---- EPP scheduling config ----
+# Same plugins/profiles as dsv4-fp4-gb200-1p1d-simple.yaml. EPP routing
+# is engine-config-agnostic.
+apiVersion: llm-d.ai/v1alpha1
+kind: EndpointPickerConfig
+
+plugins:
+  - name: file-disc
+    type: file-discovery
+    parameters:
+      path: /tmp/endpoints.yaml
+      watchFile: false
+
+  - type: disagg-headers-handler
+  - type: always-disagg-pd-decider
+  - type: disagg-profile-handler
+    parameters:
+      deciderPluginName: always-disagg-pd-decider
+  - type: prefill-filter
+  - type: decode-filter
+  - type: prefix-cache-scorer
+  - type: queue-scorer
+  - type: kv-cache-utilization-scorer
+  - type: active-request-scorer
+  - type: max-score-picker
+
+schedulingProfiles:
+  - name: prefill
+    plugins:
+      - pluginRef: prefill-filter
+      - pluginRef: prefix-cache-scorer
+        weight: 3
+      - pluginRef: queue-scorer
+        weight: 2
+      - pluginRef: kv-cache-utilization-scorer
+        weight: 2
+      - pluginRef: max-score-picker
+  - name: decode
+    plugins:
+      - pluginRef: decode-filter
+      - pluginRef: active-request-scorer
+        weight: 2
+      - pluginRef: prefix-cache-scorer
+        weight: 3
+      - pluginRef: max-score-picker
+
+dataLayer:
+  discovery:
+    pluginRef: file-disc
+
+# ---- Per-role vLLM flags ----
+# Engine config mirrors the upstream srt-slurm mid-curve-megamoe recipe
+# byte-for-byte (less the dynamo-only frontend keys). The MegaMOE shape
+# differs from the low-latency 1P+1D in three ways:
+#   1. Decode is DEP=8 (TP=1, DP=8, EP) instead of pure TP=8. This is
+#      what the "MegaMOE" name refers to: every MoE rank runs experts
+#      locally with DP-attention to hide cross-rank latency, instead of
+#      sharding tensors.
+#   2. moe-backend = deep_gemm_mega_moe on both sides (the higher-perf
+#      path; the simple recipe doesn't override moe-backend).
+#   3. enable-ep-weight-filter on both sides keeps only the experts a
+#      rank actually serves resident on GPU; without it, DEP=8 OOMs
+#      because every rank tries to hold all experts.
+prefill:
+  tp: 1
+  enable-expert-parallel: true
+  extra-args: >-
+    --kv-cache-dtype fp8
+    --max-model-len 9280
+    --max-num-seqs 16
+    --max-num-batched-tokens 32768
+    --enforce-eager
+    --gpu-memory-utilization 0.95
+    --no-enable-prefix-caching
+    --no-enable-flashinfer-autotune
+    --no-async-scheduling
+    --block-size 256
+    --tokenizer-mode deepseek_v4
+    --moe-backend deep_gemm_mega_moe
+    --enable-ep-weight-filter
+    --enable-sleep-mode
+    --no-disable-hybrid-kv-cache-manager
+    --numa-bind
+  env:
+    NCCL_CUMEM_ENABLE: "1"
+    NCCL_MNNVL_ENABLE: "1"
+    NCCL_NVLS_ENABLE: "1"
+    NCCL_P2P_LEVEL: "NVL"
+    UCX_MEMTYPE_CACHE: "n"
+    UCX_MEMTYPE_REG_WHOLE: "n"
+    UCX_TLS: "cuda_copy,cuda_ipc,tcp"
+    UCX_CUDA_IPC_ENABLE_MNNVL: "y"
+    VLLM_USE_NCCL_SYMM_MEM: "1"
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "1024"
+    VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE: "2048"
+    TILELANG_CLEANUP_TEMP_FILES: "1"
+    TORCH_SYMMMEM: "NVSHMEM"
+
+decode:
+  tp: 1
+  enable-expert-parallel: true
+  extra-args: >-
+    --kv-cache-dtype fp8
+    --max-model-len 9280
+    --max-num-seqs 512
+    --max-num-batched-tokens 512
+    --max-cudagraph-capture-size 512
+    --gpu-memory-utilization 0.9
+    --no-enable-prefix-caching
+    --no-enable-flashinfer-autotune
+    --block-size 256
+    --compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}
+    --stream-interval 50
+    --tokenizer-mode deepseek_v4
+    --moe-backend deep_gemm_mega_moe
+    --enable-ep-weight-filter
+    --enable-sleep-mode
+    --no-disable-hybrid-kv-cache-manager
+  env:
+    NCCL_CUMEM_ENABLE: "1"
+    NCCL_MNNVL_ENABLE: "1"
+    NCCL_NVLS_ENABLE: "1"
+    NCCL_P2P_LEVEL: "NVL"
+    UCX_MEMTYPE_CACHE: "n"
+    UCX_MEMTYPE_REG_WHOLE: "n"
+    UCX_TLS: "cuda_copy,cuda_ipc,tcp"
+    UCX_CUDA_IPC_ENABLE_MNNVL: "y"
+    VLLM_USE_NCCL_SYMM_MEM: "1"
+    TILELANG_CLEANUP_TEMP_FILES: "1"
+    TORCH_SYMMMEM: "NVSHMEM"
+
+# ---- SLURM resource directives ----
+slurm:
+  time_limit: "08:00:00"
