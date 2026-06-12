@@ -3274,11 +3274,15 @@ dsv4-fp4-gb200-vllm-offline:
 # per-rank DEP-4 footprint of the native FP8 checkpoint fits here.
 # Runs via the single-node branch in launch_gb300-nv.sh; weights come
 # from compute-local /scratch/models/DeepSeek-V4-Pro.
+# runner is gb300-nv (not generic gb300): the generic label is shared
+# by the NV and CW pools, and only launch_gb300-nv.sh has the
+# single-node branch (a CW machine picked up the first dispatch and
+# died in launch_gb300-cw.sh's framework check — run 27449509674).
 dsv4-fp4-gb300-vllm-offline:
   image: vllm/vllm-openai:v0.21.0-ubuntu2404
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
-  runner: gb300
+  runner: gb300-nv
   precision: fp4
   framework: vllm
   multinode: false
