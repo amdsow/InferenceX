@@ -41,9 +41,8 @@ DPA_FLAG=()
 start_gpu_monitor --output "$PWD/gpu_metrics.csv"
 
 if [[ "${SLURM_NNODES:-1}" -gt 1 ]]; then
-    export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
     export MASTER_PORT=${MASTER_PORT:-29501}
-    echo "Multi-node: MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT node_rank=$SLURM_PROCID"
+    echo "Multi-node: MASTER_ADDR=${MASTER_ADDR:-unset} MASTER_PORT=$MASTER_PORT node_rank=$SLURM_PROCID"
 fi
 
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$PWD"

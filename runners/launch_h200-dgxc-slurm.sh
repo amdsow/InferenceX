@@ -292,6 +292,12 @@ else
     salloc --partition=$SLURM_PARTITION --account=$SLURM_ACCOUNT --nodes=$ALLOC_NODES --gres=$ALLOC_GPUS --exclusive --time=180 --no-shell --job-name="$RUNNER_NAME"
     JOB_ID=$(squeue --name="$RUNNER_NAME" -u "$USER" -h -o %A | head -n1)
 
+    if [[ $ALLOC_NODES -gt 1 ]]; then
+        MASTER_ADDR=$(scontrol show hostname "$(squeue -j "$JOB_ID" -o "%N" -h)" | head -n1)
+        export MASTER_ADDR
+        echo "Resolved MASTER_ADDR=$MASTER_ADDR for job $JOB_ID"
+    fi
+
     # Use flock to serialize concurrent imports to the same squash file
     # Override ENROOT_CACHE_PATH to avoid permission issues with system-wide cache on worker nodes
     srun --jobid=$JOB_ID $SRUN_MULTI bash -c "
