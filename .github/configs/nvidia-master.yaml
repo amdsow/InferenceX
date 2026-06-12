@@ -2994,6 +2994,41 @@ dsv4-fp8-h200-sglang-mtp:
       - { tp: 8, ep: 1, conc-start: 1, conc-end: 1, spec-decoding: mtp }
       - { tp: 8, ep: 1, conc-start: 4, conc-end: 64, spec-decoding: mtp }
 
+# CANN-style offline DSV4 benchmarks — H200 FP8.
+# 8k ISL × 256 decode-step lockstep batches with forced EPLB
+# (VLLM_MOE_ROUTING_SIMULATION_STRATEGY=uniform_random, SGLang falls back to
+# real routing). No TRT entry — no DSV4 TRT image for Hopper.
+dsv4-fp8-h200-vllm-offline:
+  image: vllm/vllm-openai:v0.21.0
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: h200
+  precision: fp8
+  framework: vllm
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 8, ep: 1, dp-attn: false, conc-start: 8, conc-end: 128, spec-decoding: offline }
+      - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
+dsv4-fp8-h200-sglang-offline:
+  image: lmsysorg/sglang:deepseek-v4-hopper@sha256:7f19c6dc092e47a10fac2e41f47eab78970280d06648b8e50d312a82f0ae722f
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: h200-dgxc
+  precision: fp8
+  framework: sglang
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 8, ep: 1, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
   # DeepSeek-V4-Pro B300 single-node aggregate recipe from the submitted B300
   # pareto sweep. The single-node schema has no explicit data-parallel-size
   # field, so dp-attn=true is used as the existing vLLM script switch for DP4

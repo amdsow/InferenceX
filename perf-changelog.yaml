@@ -3608,8 +3608,10 @@
     - dsv4-fp4-b300-vllm-offline
     - dsv4-fp4-b300-sglang-offline
     - dsv4-fp4-b300-trt-offline
+    - dsv4-fp8-h200-vllm-offline
+    - dsv4-fp8-h200-sglang-offline
   description:
-    - "Add CANN-style offline DSV4 configs (in-process engine.generate, one warmup + one timed lockstep InfiniteBench batch) replicating the Huawei cann-recipes-infer 950DT benchmark on B200/B300"
+    - "Add CANN-style offline DSV4 configs (in-process engine.generate, one warmup + one timed lockstep InfiniteBench batch) replicating the Huawei cann-recipes-infer 950DT benchmark on B200/B300/H200"
     - "OSL=256 counts decode steps (main-model forward passes, CANN max_new_tokens loop bound): TPOT is per decode step and output throughput is steps/s/GPU, so rows compare directly against the published 950DT DeepSeek-V4 Pro table; MTP bonus tokens are excluded from headline metrics and observed acceptance is recorded separately"
     - "spec-decoding=offline routes launchers to dsv4_fp4_<sku>_<framework>_offline.sh; MTP draft tokens default to 3 (950DT reference next_n=3, DSV4_OFFLINE_MTP_SPEC_TOKENS to override)"
     - "MoE routing defaults to simulated uniform_random via VLLM_MOE_ROUTING_SIMULATION_STRATEGY — the forced-EPLB analog of the 950DT reference's perfect_eplb (DSV4_OFFLINE_ROUTING_SIM=none for honest routing); SGLang/TRT have no such knob and fall back to real routing; every result records what ran in moe_routing"
