@@ -3118,6 +3118,116 @@ dsv4-fp4-b300-vllm-mtp:
       - { tp: 4, ep: 4, conc-start: 64, conc-end: 256, spec-decoding: mtp }
       - { tp: 4, ep: 4, dp-attn: true, conc-start: 256, conc-end: 512, spec-decoding: mtp }
 
+# Offline (in-process engine.generate) DSV4 configs replicating the Huawei
+# cann-recipes-infer benchmark: one warmup + one timed lockstep batch of
+# InfiniteBench prompts, ISL=8192 input tokens, OSL=256 *decode steps*
+# (main-model forward passes — CANN's max_new_tokens loop bound). TPOT is
+# per decode step and throughput is steps/s/GPU, directly comparable to the
+# published 950DT DeepSeek-V4 Pro table (conc 16/64/128 on 16 chips; on 8
+# GPUs conc 8/32/64 match its per-chip load). spec-decoding=offline routes
+# the launcher to dsv4_fp4_<sku>_<framework>_offline.sh; MTP draft tokens
+# default to 3 inside those scripts (DSV4_OFFLINE_MTP_SPEC_TOKENS to
+# override, 950DT reference uses next_n=3). MoE routing defaults to
+# simulated uniform_random — the forced-EPLB analog of the reference's
+# perfect_eplb (DSV4_OFFLINE_ROUTING_SIM=none for honest routing). Only
+# vLLM supports it (VLLM_MOE_ROUTING_SIMULATION_STRATEGY); SGLang/TRT
+# fall back to real routing and every row records `moe_routing`.
+dsv4-fp4-b200-vllm-offline:
+  image: vllm/vllm-openai:v0.21.0
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: b200-dsv4
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 8, conc-start: 8, conc-end: 128, spec-decoding: offline }
+      - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
+dsv4-fp4-b200-sglang-offline:
+  image: lmsysorg/sglang:deepseek-v4-blackwell@sha256:df18bfc4aa9ecf59451002b49ba00cae58042de9e2a96378bbd21b404dd62c7b
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: b200-dsv4
+  precision: fp4
+  framework: sglang
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 8, conc-start: 8, conc-end: 128, spec-decoding: offline }
+      - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
+dsv4-fp4-b200-trt-offline:
+  image: ghcr.io#semianalysisai/trtllm-deepseek-v4:feat-deepseek_v4-9aa3715
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: b200-dsv4
+  precision: fp4
+  framework: trt
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 8, conc-start: 8, conc-end: 128, spec-decoding: offline }
+      - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
+dsv4-fp4-b300-vllm-offline:
+  image: vllm/vllm-openai:v0.21.0
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: b300
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 8, conc-start: 8, conc-end: 128, spec-decoding: offline }
+      - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
+dsv4-fp4-b300-sglang-offline:
+  image: lmsysorg/sglang:nightly-dev-cu13-20260610-f332e526
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: b300
+  precision: fp4
+  framework: sglang
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 8, conc-start: 8, conc-end: 128, spec-decoding: offline }
+      - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
+dsv4-fp4-b300-trt-offline:
+  image: ghcr.io#semianalysisai/trtllm-deepseek-v4:feat-deepseek_v4-c185066
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: b300
+  precision: fp4
+  framework: trt
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 8, conc-start: 8, conc-end: 128, spec-decoding: offline }
+      - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
 qwen3.5-fp8-h200-sglang:
   image: lmsysorg/sglang:v0.5.12-cu130
   model: Qwen/Qwen3.5-397B-A17B-FP8
