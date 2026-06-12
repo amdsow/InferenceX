@@ -40,6 +40,12 @@ DPA_FLAG=()
 [[ "${DP_ATTENTION}" == "true" ]] && DPA_FLAG=(--dp-attn)
 start_gpu_monitor --output "$PWD/gpu_metrics.csv"
 
+if [[ "${SLURM_NNODES:-1}" -gt 1 ]]; then
+    export MASTER_ADDR=$(scontrol show hostname "$SLURM_NODELIST" | head -n1)
+    export MASTER_PORT=${MASTER_PORT:-29501}
+    echo "Multi-node: MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT node_rank=$SLURM_PROCID"
+fi
+
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$PWD"
 
 set -x
@@ -55,6 +61,8 @@ PYTHONNOUSERSITE=1 python3 utils/bench_offline/run_offline.py \
     --infinitebench-input-len "$ISL" \
     --decode-steps "$OSL" \
     --routing-sim-strategy "${DSV4_OFFLINE_ROUTING_SIM:-uniform_random}" \
+    --nnodes "${SLURM_NNODES:-1}" \
+    --node-rank "${SLURM_PROCID:-0}" \
     --batch-size "$CONC" \
     --result-dir "$PWD/" \
     --result-filename "$RESULT_FILENAME" \

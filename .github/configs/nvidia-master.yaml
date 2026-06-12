@@ -3029,6 +3029,21 @@ dsv4-fp8-h200-sglang-offline:
       search-space:
       - { tp: 8, ep: 1, conc-start: 8, conc-end: 128, spec-decoding: offline }
 
+dsv4-fp8-h200-vllm-offline-2n:
+  image: vllm/vllm-openai:v0.21.0
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: h200-dgxc
+  precision: fp8
+  framework: vllm
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 16, ep: 16, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
   # DeepSeek-V4-Pro B300 single-node aggregate recipe from the submitted B300
   # pareto sweep. The single-node schema has no explicit data-parallel-size
   # field, so dp-attn=true is used as the existing vLLM script switch for DP4

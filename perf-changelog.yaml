@@ -3609,6 +3609,7 @@
     - dsv4-fp4-b300-sglang-offline
     - dsv4-fp4-b300-trt-offline
     - dsv4-fp8-h200-vllm-offline
+    - dsv4-fp8-h200-vllm-offline-2n
     - dsv4-fp8-h200-sglang-offline
   description:
     - "Add CANN-style offline DSV4 configs (in-process engine.generate, one warmup + one timed lockstep InfiniteBench batch) replicating the Huawei cann-recipes-infer 950DT benchmark on B200/B300/H200"

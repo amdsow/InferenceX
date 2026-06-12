@@ -17,6 +17,7 @@ import argparse
 import multiprocessing as mp
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from latency_utils import (
@@ -77,6 +78,11 @@ def _build_llm_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
             "method": "mtp",
             "num_speculative_tokens": args.mtp,
         }
+    if getattr(args, "nnodes", 1) > 1:
+        llm_kwargs["nnodes"] = args.nnodes
+        llm_kwargs["node_rank"] = args.node_rank
+        llm_kwargs["master_addr"] = os.environ.get("MASTER_ADDR", "127.0.0.1")
+        llm_kwargs["master_port"] = int(os.environ.get("MASTER_PORT", "29501"))
     return llm_kwargs
 
 
@@ -302,27 +308,31 @@ def _build_sampling_dict(args: argparse.Namespace) -> Dict[str, Any]:
 
 def _run_dp(args: argparse.Namespace,
             prompts: List[Tuple[str, int, int]]) -> Dict[str, Any]:
+    import json as _json
     from vllm.utils.network_utils import get_open_port
 
-    dp_size = args.tp
+    nnodes = getattr(args, "nnodes", 1)
+    node_rank = getattr(args, "node_rank", 0)
+    total_dp_size = args.tp
+    local_dp_size = total_dp_size // nnodes
+
     llm_kwargs = _build_llm_kwargs(args)
-    # DP-attn: each of `tp` workers runs LLM(tensor_parallel_size=1, EP=True)
-    # WITHOUT data_parallel_size as an LLM kwarg. The single-process check in
-    # vllm/entrypoints/llm.py rejects LLM(data_parallel_size>1) per process,
-    # but ParallelConfig falls back to VLLM_DP_SIZE/VLLM_DP_RANK env vars
-    # ("offline SPMD case", parallel.py:774-786). So each worker only sees
-    # tp=1, ep on, and the env vars give it its DP rank/topology — same shape
-    # as examples/offline_inference/data_parallel.py, which pops
-    # data_parallel_size from kwargs before LLM(...).
+    # DP-attn: each worker runs LLM(tensor_parallel_size=1, EP=True)
+    # WITHOUT data_parallel_size as an LLM kwarg. ParallelConfig falls
+    # back to VLLM_DP_SIZE/VLLM_DP_RANK env vars ("offline SPMD case",
+    # parallel.py:774-786). Strip multi-node TP kwargs — workers are
+    # single-GPU; cross-node coordination uses VLLM_DP_* env vars.
+    for k in ("nnodes", "node_rank", "master_addr", "master_port"):
+        llm_kwargs.pop(k, None)
     llm_kwargs["tensor_parallel_size"] = 1
     llm_kwargs["enable_expert_parallel"] = True
 
     sampling_dict = _build_sampling_dict(args)
     prompt_strs = [p for (p, _, _) in prompts]
 
-    # Even-split prompts across DP ranks (data_parallel.py example pattern).
-    floor = len(prompt_strs) // dp_size
-    rem = len(prompt_strs) % dp_size
+    # Even-split prompts across ALL DP ranks.
+    floor = len(prompt_strs) // total_dp_size
+    rem = len(prompt_strs) % total_dp_size
 
     def slice_for(rank: int) -> List[str]:
         start = rank * floor + min(rank, rem)
@@ -330,28 +340,38 @@ def _run_dp(args: argparse.Namespace,
         s = prompt_strs[start:end]
         return s if s else ["Placeholder"]
 
-    master_ip = "127.0.0.1"
-    master_port = get_open_port()
-    print(f"[vllm_offline] DP-attn: spawning {dp_size} workers "
-          f"(data_parallel_size={dp_size}, tensor_parallel_size=1, "
-          f"enable_expert_parallel=True), master={master_ip}:{master_port}")
+    if nnodes > 1:
+        master_ip = os.environ.get("MASTER_ADDR", "127.0.0.1")
+        master_port = int(os.environ.get("VLLM_DP_PORT",
+                                         os.environ.get("MASTER_PORT", "29501")))
+    else:
+        master_ip = "127.0.0.1"
+        master_port = get_open_port()
+
+    rank_offset = node_rank * local_dp_size
+    print(f"[vllm_offline] DP-attn: node {node_rank}/{nnodes}, "
+          f"spawning {local_dp_size} local workers (global ranks "
+          f"{rank_offset}..{rank_offset + local_dp_size - 1}, "
+          f"total_dp_size={total_dp_size}), master={master_ip}:{master_port}")
 
     ctx = mp.get_context("spawn")
     result_q: "mp.Queue" = ctx.Queue()
     procs: List[mp.Process] = []
-    for rank in range(dp_size):
+    for local_rank in range(local_dp_size):
+        global_rank = rank_offset + local_rank
         p = ctx.Process(
             target=_dp_worker,
-            args=(rank, rank, dp_size, master_ip, master_port,
-                  llm_kwargs, sampling_dict, slice_for(rank),
+            args=(local_rank, global_rank, total_dp_size,
+                  master_ip, master_port,
+                  llm_kwargs, sampling_dict, slice_for(global_rank),
                   args, result_q),
         )
         p.start()
         procs.append(p)
 
     rank_results: List[Dict[str, Any]] = []
-    deadline = time.time() + 1800  # 30 min cap for DP run
-    while len(rank_results) < dp_size and time.time() < deadline:
+    deadline = time.time() + 1800
+    while len(rank_results) < local_dp_size and time.time() < deadline:
         try:
             rank_results.append(result_q.get(timeout=60))
         except Exception:
@@ -369,17 +389,35 @@ def _run_dp(args: argparse.Namespace,
         for r in failed:
             print(f"[vllm_offline] rank {r['rank']} FAILED: {r.get('err')}\n"
                   f"{r.get('tb','')}")
-        raise RuntimeError(f"{len(failed)}/{dp_size} DP workers failed")
-    if len(rank_results) < dp_size:
         raise RuntimeError(
-            f"Only {len(rank_results)}/{dp_size} workers reported back")
+            f"{len(failed)}/{local_dp_size} DP workers failed on node {node_rank}")
+    if len(rank_results) < local_dp_size:
+        raise RuntimeError(
+            f"Only {len(rank_results)}/{local_dp_size} workers reported on node {node_rank}")
+
+    # Multi-node: follower writes partial results to shared FS and exits.
+    if nnodes > 1 and node_rank > 0:
+        partial_path = Path(args.result_dir) / f".dp_partial_node{node_rank}.json"
+        partial_path.write_text(_json.dumps(rank_results, default=str))
+        print(f"[vllm_offline DP] node {node_rank}: wrote {len(rank_results)} "
+              f"rank results to {partial_path}")
+        return {}
+
+    # Multi-node leader: read follower partial results.
+    if nnodes > 1:
+        for nid in range(1, nnodes):
+            partial_path = Path(args.result_dir) / f".dp_partial_node{nid}.json"
+            print(f"[vllm_offline DP] leader: waiting for {partial_path}")
+            while not partial_path.exists():
+                time.sleep(2)
+            remote_results = _json.loads(partial_path.read_text())
+            rank_results.extend(remote_results)
+            print(f"[vllm_offline DP] leader: read {len(remote_results)} "
+                  f"rank results from node {nid}")
 
     rank_metrics = [r["metrics"] for r in
                     sorted(rank_results, key=lambda r: r["rank"])]
 
-    # Aggregate. timed/warmup wall = max across ranks (parallel). Token totals
-    # sum. Per-request samples concatenate. Input tokens come from the full
-    # prompts list at the parent (we know per-prompt token counts already).
     total_input_tokens = sum(plen for (_, plen, _) in prompts)
     agg: Dict[str, Any] = {
         "warmup_seconds": max(m["warmup_seconds"] for m in rank_metrics),
@@ -401,7 +439,7 @@ def _run_dp(args: argparse.Namespace,
         "latency_metrics_source": "vllm_request_metrics_dp",
         "moe_routing": _routing_label(args),
     }
-    print(f"[vllm_offline DP] aggregated across {dp_size} ranks: "
+    print(f"[vllm_offline DP] aggregated across {total_dp_size} ranks: "
           f"timed={agg['timed_seconds']:.2f}s, "
           f"out_toks={agg['total_output_tokens']}, "
           f"decode_rounds={agg['decode_rounds_total']}")
@@ -438,3 +476,29 @@ def run(args: argparse.Namespace,
     if args.dp_attn:
         return _run_dp(args, prompts)
     return _run_single(args, prompts)
+
+
+def run_follower(args: argparse.Namespace) -> None:
+    """Follower node: construct LLM engine (starts NCCL workers that
+    participate in the leader's all-reduce), then block until the leader
+    writes a sentinel file after benchmark completion."""
+    from vllm import LLM
+
+    _apply_routing_sim(args)
+    llm_kwargs = _build_llm_kwargs(args)
+    llm_kwargs["tensor_parallel_size"] = args.tp
+    if args.ep > 1:
+        llm_kwargs["enable_expert_parallel"] = True
+
+    print(f"[vllm_offline follower] node_rank={args.node_rank} "
+          f"LLM kwargs: {llm_kwargs}")
+
+    t_load = time.perf_counter()
+    _llm = LLM(**llm_kwargs)
+    print(f"[vllm_offline follower] Engine init: "
+          f"{time.perf_counter() - t_load:.2f}s — waiting for leader")
+
+    sentinel = Path(args.result_dir) / ".offline_follower_exit"
+    while not sentinel.exists():
+        time.sleep(2)
+    print("[vllm_offline follower] Leader signalled done, exiting.")

@@ -105,6 +105,10 @@ def main() -> None:
     parser.add_argument("--dp-attn", action="store_true")
     parser.add_argument("--num-chips", type=int, default=8,
                         help="Total chips (==tp here for single-node).")
+    parser.add_argument("--nnodes", type=int, default=1,
+                        help="Number of nodes (for multi-node tp>8).")
+    parser.add_argument("--node-rank", type=int, default=0,
+                        help="This node's rank (0=leader, >0=follower).")
     parser.add_argument("--max-model-len", type=int, default=9472)
     parser.add_argument("--mtp", type=int, default=3,
                         help="Number of MTP / EAGLE speculative tokens "
@@ -205,7 +209,16 @@ def main() -> None:
           f"isl={args.infinitebench_input_len} "
           f"decode_steps={args.decode_steps} "
           f"mtp={args.mtp} tp={args.tp} ep={args.ep} dp_attn={args.dp_attn} "
+          f"nnodes={args.nnodes} node_rank={args.node_rank} "
           f"routing_sim={args.routing_sim_strategy}")
+
+    if args.node_rank > 0 and not args.dp_attn:
+        if args.engine == "vllm":
+            from vllm_offline import run_follower
+        else:
+            raise ValueError(f"Multi-node follower not supported for engine={args.engine}")
+        run_follower(args)
+        sys.exit(0)
 
     tokenizer = _load_tokenizer(
         args.model,
@@ -228,6 +241,10 @@ def main() -> None:
     )
 
     metrics = _engine_run(args, prompts)
+
+    if args.node_rank > 0:
+        print(f"[run_offline] Follower node {args.node_rank} done.")
+        sys.exit(0)
 
     timed_s = metrics["timed_seconds"]
     total_output_tokens = metrics["total_output_tokens"]
@@ -467,6 +484,9 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{args.result_filename}.json"
     out_path.write_text(json.dumps(result, indent=2))
+
+    if args.nnodes > 1:
+        (out_dir / ".offline_follower_exit").touch()
 
     # Also stdout the metric line that downstream collectors look for.
     print("============ Offline Benchmark Result ============")
