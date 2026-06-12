@@ -3612,6 +3612,7 @@
     - dsv4-fp8-h200-vllm-offline-2n
     - dsv4-fp8-h200-sglang-offline
     - dsv4-fp4-gb200-vllm-offline
+    - dsv4-fp4-gb300-vllm-offline
   description:
     - "Add CANN-style offline DSV4 configs (in-process engine.generate, one warmup + one timed lockstep InfiniteBench batch) replicating the Huawei cann-recipes-infer 950DT benchmark on B200/B300/H200"
     - "OSL=256 counts decode steps (main-model forward passes, CANN max_new_tokens loop bound): TPOT is per decode step and output throughput is steps/s/GPU, so rows compare directly against the published 950DT DeepSeek-V4 Pro table; MTP bonus tokens are excluded from headline metrics and observed acceptance is recorded separately"

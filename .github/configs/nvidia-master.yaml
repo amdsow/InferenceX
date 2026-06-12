@@ -3251,11 +3251,34 @@ dsv4-fp4-b300-vllm-offline:
 # experts sharded 4-way. Uses the multi-arch -ubuntu2404 image tag (the
 # GB200 login/compute nodes are aarch64 Grace; the plain v0.21.0 tag is
 # x86-only). Runs via the new single-node branch in launch_gb200-nv.sh.
+# NOTE: confirmed NOT to fit — the /mnt/numa1 checkpoint is the native
+# FP8 806 GB one, and DEP-4 needs >184 GB/GPU (OOM during weight load,
+# run 27449109824). Kept for reference; use the gb300 sibling below.
 dsv4-fp4-gb200-vllm-offline:
   image: vllm/vllm-openai:v0.21.0-ubuntu2404
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
   runner: gb200
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 4, ep: 4, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
+
+# GB300 sibling of dsv4-fp4-gb200-vllm-offline — same CANN-style offline
+# shape, but on a 4-GPU GB300 tray (288 GB HBM per GPU): the ~230-270 GB
+# per-rank DEP-4 footprint of the native FP8 checkpoint fits here.
+# Runs via the single-node branch in launch_gb300-nv.sh; weights come
+# from compute-local /scratch/models/DeepSeek-V4-Pro.
+dsv4-fp4-gb300-vllm-offline:
+  image: vllm/vllm-openai:v0.21.0-ubuntu2404
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: gb300
   precision: fp4
   framework: vllm
   multinode: false
