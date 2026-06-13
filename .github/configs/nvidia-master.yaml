@@ -3230,6 +3230,10 @@ dsv4-fp4-b200-trt-offline:
       - { tp: 8, conc-start: 8, conc-end: 128, spec-decoding: offline }
       - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
 
+# B300 single-node (8-GPU HGX B300) DEP=8 — each GPU is a DP-attention rank
+# (tp=1) with experts sharded 8-way. DEP-only (the pure-TP=8 line was dropped:
+# we want the Huawei-comparable DEP shape, not tensor parallelism). x86 host,
+# so the plain v0.21.0 image (no -ubuntu2404).
 dsv4-fp4-b300-vllm-offline:
   image: vllm/vllm-openai:v0.21.0
   model: deepseek-ai/DeepSeek-V4-Pro
@@ -3243,7 +3247,6 @@ dsv4-fp4-b300-vllm-offline:
     - isl: 8192
       osl: 256
       search-space:
-      - { tp: 8, conc-start: 8, conc-end: 128, spec-decoding: offline }
       - { tp: 8, ep: 8, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
 
 # GB200 single-node (one 4-GPU Grace-Blackwell tray) CANN-style offline
