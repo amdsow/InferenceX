@@ -3293,6 +3293,29 @@ dsv4-fp4-gb300-vllm-offline:
       search-space:
       - { tp: 4, ep: 4, dp-attn: true, conc-start: 8, conc-end: 128, spec-decoding: offline }
 
+# GB300 16-chip DEP=16 — 4 trays (4 GPUs each) in one NVL72 rack, cross-tray
+# DP/EP over NVLink (the apples-to-apples analog of Huawei 950DT's scale-up
+# fabric). multinode:false keeps the offline bench-script path; launch_gb300-nv.sh
+# detects TP>4 and allocates TP/4 = 4 nodes (one bench-script task per tray,
+# SLURM_PROCID = DP node_rank). Conc is the global batch, split evenly across
+# all 16 DP ranks, so the sweep uses multiples of 16 to give every rank an
+# equal batch: {32,64,128,256,512} -> per-rank {2,4,8,16,32}, matching the
+# DEP=4 per-GPU batch for a direct per-chip comparison.
+dsv4-fp4-gb300-vllm-offline-16chip:
+  image: vllm/vllm-openai:v0.21.0-ubuntu2404
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: gb300-nv
+  precision: fp4
+  framework: vllm
+  multinode: false
+  scenarios:
+    fixed-seq-len:
+    - isl: 8192
+      osl: 256
+      search-space:
+      - { tp: 16, ep: 16, dp-attn: true, conc-start: 32, conc-end: 512, spec-decoding: offline }
+
 dsv4-fp4-b300-sglang-offline:
   image: lmsysorg/sglang:nightly-dev-cu13-20260610-f332e526
   model: deepseek-ai/DeepSeek-V4-Pro

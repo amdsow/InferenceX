@@ -112,8 +112,35 @@ if [[ "$IS_MULTINODE" != "true" ]]; then
         BENCH_SCRIPT="${BENCH_BASE}${SPEC_SUFFIX}.sh"
     fi
 
-    salloc --partition=$SLURM_PARTITION --account=$SLURM_ACCOUNT -N 1 --gres=gpu:$TP --exclusive --time=180 --no-shell --job-name="$RUNNER_NAME"
+    # A GB300 NVL72 Slurm node is one 4-GPU tray. TP<=4 fits on a single
+    # tray (the DEP=4 offline bench). TP>4 (e.g. DEP=16) spans multiple
+    # trays in the same rack: allocate TP/4 nodes, 4 GPUs each, and run the
+    # bench script once per node (distinct SLURM_PROCID = DP node_rank).
+    # Cross-tray DP/EP NCCL rides the rack NVLink domain; only the initial
+    # TCP rendezvous uses the inter-node IP network (known-good here — this
+    # cluster runs multi-node srt-slurm jobs). Mirrors launch_h200-dgxc-slurm.sh.
+    GPUS_PER_NODE=4
+    if [[ $TP -gt $GPUS_PER_NODE ]]; then
+        ALLOC_NODES=$(( TP / GPUS_PER_NODE ))
+        ALLOC_GPUS="gpu:${GPUS_PER_NODE}"
+        SRUN_MULTI="--nodes=${ALLOC_NODES} --ntasks=${ALLOC_NODES} --ntasks-per-node=1"
+    else
+        ALLOC_NODES=1
+        ALLOC_GPUS="gpu:${TP}"
+        SRUN_MULTI=""
+    fi
+
+    salloc --partition=$SLURM_PARTITION --account=$SLURM_ACCOUNT -N "$ALLOC_NODES" --gres=$ALLOC_GPUS --exclusive --time=180 --no-shell --job-name="$RUNNER_NAME"
     JOB_ID=$(squeue --name="$RUNNER_NAME" -u "$USER" -h -o %A | head -n1)
+
+    # Multi-node DP rendezvous needs the head node's hostname. scontrol runs
+    # on the login node (compute lacks it), so resolve here and export into
+    # the container via --export=ALL.
+    if [[ $ALLOC_NODES -gt 1 ]]; then
+        MASTER_ADDR=$(scontrol show hostname "$(squeue -j "$JOB_ID" -o '%N' -h)" | head -n1)
+        export MASTER_ADDR
+        echo "Resolved MASTER_ADDR=$MASTER_ADDR for job $JOB_ID"
+    fi
 
     # MODEL_PATH is node-local (/scratch) on compute; bind-mount it so the
     # bench script's directory check sees it inside the container.
@@ -122,8 +149,20 @@ if [[ "$IS_MULTINODE" != "true" ]]; then
         MODEL_MOUNT=",$MODEL_PATH:$MODEL_PATH"
     fi
 
+    # Pre-flight: /scratch is node-local, so the model must be staged on
+    # every allocated tray. Fail fast with the offending hostname rather
+    # than letting one node OOM/crash deep into vLLM startup.
+    if [[ $ALLOC_NODES -gt 1 && "${MODEL_PATH:-}" == /* ]]; then
+        if ! srun --jobid=$JOB_ID --nodes=$ALLOC_NODES --ntasks=$ALLOC_NODES --ntasks-per-node=1 \
+                bash -c "test -d '$MODEL_PATH' || { echo \"MISSING $MODEL_PATH on \$(hostname)\"; exit 1; }"; then
+            echo "Model not staged on all $ALLOC_NODES nodes; aborting"
+            scancel "$JOB_ID"
+            exit 1
+        fi
+    fi
+
     RC=0
-    srun --jobid=$JOB_ID \
+    srun --jobid=$JOB_ID $SRUN_MULTI \
         --mpi=none \
         --container-image=$SQUASH_FILE \
         --container-mounts=$GITHUB_WORKSPACE:/workspace${MODEL_MOUNT} \

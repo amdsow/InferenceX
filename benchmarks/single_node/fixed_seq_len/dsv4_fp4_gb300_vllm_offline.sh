@@ -38,7 +38,20 @@ nvidia-smi
 NUM_SPEC_TOKENS="$(dsv4_mtp_spec_tokens_for_spec_decoding)"
 DPA_FLAG=()
 [[ "${DP_ATTENTION}" == "true" ]] && DPA_FLAG=(--dp-attn)
-start_gpu_monitor --output "$PWD/gpu_metrics.csv"
+
+# Multi-node DEP (TP>4 spans NVL72 trays): srun --ntasks-per-node=1 runs
+# this script once per node with SLURM_PROCID as the DP node_rank and
+# SLURM_NNODES as the node count. MASTER_ADDR is exported by the launcher.
+# All nodes share $PWD (/workspace on shared FS), so suffix the per-node
+# GPU-metrics file to avoid clobbering — node 0 keeps the canonical name
+# the harness collects.
+if [[ "${SLURM_NNODES:-1}" -gt 1 ]]; then
+    export MASTER_PORT=${MASTER_PORT:-29501}
+    echo "Multi-node: MASTER_ADDR=${MASTER_ADDR:-unset} MASTER_PORT=$MASTER_PORT node_rank=$SLURM_PROCID"
+fi
+GPU_METRICS_OUT="$PWD/gpu_metrics.csv"
+[[ "${SLURM_PROCID:-0}" -gt 0 ]] && GPU_METRICS_OUT="$PWD/gpu_metrics_node${SLURM_PROCID}.csv"
+start_gpu_monitor --output "$GPU_METRICS_OUT"
 
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$PWD"
 
@@ -55,6 +68,8 @@ PYTHONNOUSERSITE=1 python3 utils/bench_offline/run_offline.py \
     --infinitebench-input-len "$ISL" \
     --decode-steps "$OSL" \
     --routing-sim-strategy "${DSV4_OFFLINE_ROUTING_SIM:-uniform_random}" \
+    --nnodes "${SLURM_NNODES:-1}" \
+    --node-rank "${SLURM_PROCID:-0}" \
     --batch-size "$CONC" \
     --result-dir "$PWD/" \
     --result-filename "$RESULT_FILENAME" \
