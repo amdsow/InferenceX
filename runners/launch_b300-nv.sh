@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-# System-specific configuration for B300 NV Slurm cluster
+# System-specific configuration for B300 NV Slurm cluster (sa-shared)
 SLURM_PARTITION="batch_1"
 SLURM_ACCOUNT="benchmark"
 
@@ -339,7 +339,7 @@ else
         export MODEL_PATH="${WRITABLE_MODELS_DIR%/}/${MODEL_BASENAME}"
     fi
 
-    SQUASH_FILE="/data/home/sa-shared/gharunners/squash/$(echo "$IMAGE" | sed 's/[\/:@#]/_/g').sqsh"
+    SQUASH_FILE="/data/squash/$(echo "$IMAGE" | sed 's/[\/:@#]/_/g').sqsh"
     case "$SPEC_DECODING" in
         mtp)     SPEC_SUFFIX='_mtp' ;;
         offline) SPEC_SUFFIX='_offline' ;;  # in-process engine (CANN-style)
