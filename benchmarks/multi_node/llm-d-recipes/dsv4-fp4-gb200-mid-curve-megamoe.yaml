@@ -91,21 +91,23 @@ dataLayer:
 prefill:
   tp: 1
   enable-expert-parallel: true
+  # Tier 1+2 upstream-wide-ep-lws-style tuning (2026-06-16):
+  #   - dropped --max-num-seqs / --max-num-batched-tokens caps (let engine default)
+  #   - dropped --enable-sleep-mode (carryover from earlier OOM fix; not needed at max-model-len=9280)
+  #   - dropped --no-enable-prefix-caching, --no-enable-flashinfer-autotune
+  #   - lowered --gpu-memory-utilization 0.95 -> 0.9
+  #   - added --enable-cumem-allocator
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 9280
-    --max-num-seqs 16
-    --max-num-batched-tokens 32768
     --enforce-eager
-    --gpu-memory-utilization 0.95
-    --no-enable-prefix-caching
-    --no-enable-flashinfer-autotune
+    --gpu-memory-utilization 0.9
+    --enable-cumem-allocator
     --no-async-scheduling
     --block-size 256
     --tokenizer-mode deepseek_v4
     --moe-backend deep_gemm_mega_moe
     --enable-ep-weight-filter
-    --enable-sleep-mode
     --no-disable-hybrid-kv-cache-manager
     --numa-bind
   env:
@@ -122,26 +124,35 @@ prefill:
     VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE: "2048"
     TILELANG_CLEANUP_TEMP_FILES: "1"
     TORCH_SYMMMEM: "NVSHMEM"
+    # Upstream-parity additions (2026-06-16):
+    VLLM_SKIP_P2P_CHECK: "1"
+    VLLM_RANDOMIZE_DP_DUMMY_INPUTS: "1"
+    VLLM_USE_DEEP_GEMM: "1"
+    NVIDIA_GDRCOPY: "enabled"
+    VLLM_HTTP_TIMEOUT_KEEP_ALIVE: "120"
 
 decode:
   tp: 1
   enable-expert-parallel: true
+  # Tier 1+2 upstream-wide-ep-lws-style tuning (2026-06-16):
+  #   - dropped --enable-sleep-mode
+  #   - dropped --no-enable-prefix-caching, --no-enable-flashinfer-autotune
+  #   - lowered --gpu-memory-utilization 0.9 -> 0.85
+  #   - added --enable-cumem-allocator
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 9280
     --max-num-seqs 512
     --max-num-batched-tokens 512
     --max-cudagraph-capture-size 512
-    --gpu-memory-utilization 0.9
-    --no-enable-prefix-caching
-    --no-enable-flashinfer-autotune
+    --gpu-memory-utilization 0.85
+    --enable-cumem-allocator
     --block-size 256
     --compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}
     --stream-interval 50
     --tokenizer-mode deepseek_v4
     --moe-backend deep_gemm_mega_moe
     --enable-ep-weight-filter
-    --enable-sleep-mode
     --no-disable-hybrid-kv-cache-manager
   env:
     NCCL_CUMEM_ENABLE: "1"
@@ -155,6 +166,11 @@ decode:
     VLLM_USE_NCCL_SYMM_MEM: "1"
     TILELANG_CLEANUP_TEMP_FILES: "1"
     TORCH_SYMMMEM: "NVSHMEM"
+    # Upstream-parity additions (2026-06-16):
+    VLLM_SKIP_P2P_CHECK: "1"
+    VLLM_RANDOMIZE_DP_DUMMY_INPUTS: "1"
+    VLLM_USE_DEEP_GEMM: "1"
+    NVIDIA_GDRCOPY: "enabled"
 
 # ---- SLURM resource directives ----
 slurm:
