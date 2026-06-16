@@ -14,7 +14,10 @@ set -x
 # ----------------------------------------------------------------------
 if [[ "$FRAMEWORK" == "llm-d-vllm" ]]; then
     if [[ "$MODEL_PREFIX" == "dsv4" && "$PRECISION" == "fp4" ]]; then
-        export MODEL_PATH="/mnt/numa1/models/deepseek-v4-pro/"
+        # Cluster ops moved DSV4-Pro FP4 weights from per-node NVMe
+        # (/mnt/numa1/models/deepseek-v4-pro/) to shared Lustre
+        # (/mnt/lustre01/models/DeepSeek-V4-Pro-NVFP4) on 2026-06-16.
+        export MODEL_PATH="/mnt/lustre01/models/DeepSeek-V4-Pro-NVFP4"
         export MODEL_NAME="deepseek-ai/DeepSeek-V4-Pro"
     else
         echo "Unsupported MODEL_PREFIX/PRECISION for llm-d-vllm on GB200: $MODEL_PREFIX/$PRECISION" >&2
