@@ -103,6 +103,7 @@ prefill:
     --no-async-scheduling
     --block-size 256
     --tokenizer-mode deepseek_v4
+    --quantization nvfp4
     --enable-sleep-mode
     --no-disable-hybrid-kv-cache-manager
     --numa-bind
@@ -141,6 +142,7 @@ decode:
     --compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}
     --stream-interval 50
     --tokenizer-mode deepseek_v4
+    --quantization nvfp4
     --enable-sleep-mode
     --no-disable-hybrid-kv-cache-manager
   env:
