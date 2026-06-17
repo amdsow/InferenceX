@@ -420,20 +420,24 @@ PY
     done
     echo "Envoy admin ready; listener should be on $ENVOY_PORT"
 
-    # Wait for the prefill leader's sidecar before starting the bench.
-    # wait_for_server_ready can only probe localhost; the prefill leader
-    # is on a different node, so poll directly with a deadline.
-    echo "Waiting for prefill sidecar at $PREFILL_LEADER_IP:$SIDECAR_PORT/health"
+    # Wait for the prefill leader's vLLM before starting the bench.
+    # Prefill ranks each wait on their own local vLLM /health, but the
+    # decode leader cannot observe that; it needs its own readiness gate
+    # against the prefill leader (different node). The decode-side
+    # sidecar will hit prefill vLLM directly via the EPP-routed
+    # endpoint, so vLLM /health is the right thing to poll. wait_for_server_ready
+    # only probes localhost, hence the manual deadline loop here.
+    echo "Waiting for prefill vLLM at $PREFILL_LEADER_IP:$VLLM_PORT/health"
     PREFILL_WAIT_DEADLINE=$(( $(date +%s) + 300 ))
     until curl --output /dev/null --silent --fail \
-            "http://$PREFILL_LEADER_IP:$SIDECAR_PORT/health"; do
+            "http://$PREFILL_LEADER_IP:$VLLM_PORT/health"; do
         if [[ "$(date +%s)" -ge "$PREFILL_WAIT_DEADLINE" ]]; then
-            echo "ERROR: prefill sidecar did not become ready within 5 min" >&2
+            echo "ERROR: prefill vLLM did not become ready within 5 min" >&2
             exit 1
         fi
         sleep 5
     done
-    echo "Prefill sidecar at $PREFILL_LEADER_IP:$SIDECAR_PORT is ready"
+    echo "Prefill vLLM at $PREFILL_LEADER_IP:$VLLM_PORT is ready"
 
     # Sweep concurrency. BENCH_MAX_CONCURRENCY arrives from submit.sh as
     # an 'x'-delimited list (e.g. "2048x1024x512"); the runner / sweep
