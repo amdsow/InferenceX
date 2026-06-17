@@ -14,10 +14,12 @@ set -x
 # ----------------------------------------------------------------------
 if [[ "$FRAMEWORK" == "llm-d-vllm" ]]; then
     if [[ "$MODEL_PREFIX" == "dsv4" && "$PRECISION" == "fp4" ]]; then
-        # Cluster ops moved DSV4-Pro FP4 weights from per-node NVMe
-        # (/mnt/numa1/models/deepseek-v4-pro/) to shared Lustre
-        # (/mnt/lustre01/models/DeepSeek-V4-Pro-NVFP4) on 2026-06-16.
-        export MODEL_PATH="/mnt/lustre01/models/DeepSeek-V4-Pro-NVFP4"
+        # Switched from per-node NVMe (/mnt/numa1/models/deepseek-v4-pro/)
+        # to shared Lustre (/mnt/lustre01/models/deepseek-v4-pro) on
+        # 2026-06-16 after the per-node NVMe stage went missing on every
+        # GB200 node. The DeepSeek-V4-Pro-NVFP4 lustre checkpoint we
+        # tried in between did not work; this is the path that does.
+        export MODEL_PATH="/mnt/lustre01/models/deepseek-v4-pro"
         export MODEL_NAME="deepseek-ai/DeepSeek-V4-Pro"
     else
         echo "Unsupported MODEL_PREFIX/PRECISION for llm-d-vllm on GB200: $MODEL_PREFIX/$PRECISION" >&2

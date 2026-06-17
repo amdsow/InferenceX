@@ -274,20 +274,23 @@ VLLM_PID=$!
 wait_for_server_ready --port "$VLLM_PORT" --server-log "$VLLM_LOG" --server-pid "$VLLM_PID"
 echo "vLLM ready on rank $NODE_RANK ($ROLE worker_index=$LWS_WORKER_INDEX)"
 
-# Only the leader of each instance accepts external requests on $VLLM_PORT.
-if [[ "$LWS_WORKER_INDEX" -eq 0 ]]; then
-    # ------------------------------------------------------------
-    # Start pd-sidecar on each leader (prefill leader and decode leader).
-    # The decode-side sidecar is what EPP routes to; the prefill-side
-    # sidecar is the target the decode sidecar pulls KVs from.
-    # ------------------------------------------------------------
+# Only the leader of each instance accepts external requests.
+# pd-sidecar runs ONLY on the decode leader. EPP routes prefill requests
+# directly to prefill vLLM at PREFILL_LEADER_IP:$VLLM_PORT (see endpoints
+# file generation below). The decode sidecar is the only consumer of the
+# pd-sidecar HTTP API: it forwards prefill requests directly to prefill
+# vLLM, reads kv_transfer_params from vLLM's response, then forwards the
+# request to local decode vLLM with those params. Decode vLLM's NIXLv2 KV
+# connector pulls KV blocks directly from prefill vLLM's NIXL endpoint -
+# no prefill sidecar in the data path. Confirmed against
+# llm-d/llm-d-inference-scheduler@HEAD pkg/sidecar/proxy/connector_nixlv2.go
+# and deploy/components/vllm-prefill/deployment.yaml.
+if [[ "$ROLE" == "decode" && "$LWS_WORKER_INDEX" -eq 0 ]]; then
     SIDECAR_CONNECTOR="nixlv2"
     SIDECAR_FLAGS=(--port="$SIDECAR_PORT" --vllm-port="$VLLM_PORT"
-                   --kv-connector="$SIDECAR_CONNECTOR" --secure-proxy=false)
-    if [[ "$ROLE" == "decode" ]]; then
-        SIDECAR_FLAGS+=(--enable-prefiller-sampling)
-    fi
-    echo "Starting pd-sidecar ($ROLE leader): ${SIDECAR_FLAGS[*]}"
+                   --kv-connector="$SIDECAR_CONNECTOR" --secure-proxy=false
+                   --enable-prefiller-sampling)
+    echo "Starting pd-sidecar (decode leader): ${SIDECAR_FLAGS[*]}"
     pd-sidecar "${SIDECAR_FLAGS[@]}" > "$SIDECAR_LOG" 2>&1 &
     SIDECAR_PID=$!
     wait_for_server_ready --port "$SIDECAR_PORT" --server-log "$SIDECAR_LOG" --server-pid "$SIDECAR_PID"
@@ -308,11 +311,16 @@ if [[ "$ROLE" == "decode" && "$LWS_WORKER_INDEX" -eq 0 ]]; then
 import os, yaml
 NS = 'inferencex'
 endpoints = [
+    # Prefill points directly at vLLM ($VLLM_PORT) - no sidecar on the
+    # prefill leader. The decode-side sidecar talks to prefill vLLM
+    # directly and reads kv_transfer_params from vLLM's native response.
     {'name': 'prefill-0',
      'namespace': NS,
      'address': os.environ['PREFILL_LEADER_IP'],
-     'port': '$SIDECAR_PORT',
+     'port': '$VLLM_PORT',
      'labels': {'llm-d.ai/role': 'prefill'}},
+    # Decode points at the local pd-sidecar ($SIDECAR_PORT), which
+    # orchestrates the P/D handshake and forwards to local decode vLLM.
     {'name': 'decode-0',
      'namespace': NS,
      'address': os.environ['DECODE_LEADER_IP'],
