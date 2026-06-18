@@ -48,7 +48,13 @@ from transformers import PreTrainedTokenizerBase
 try:
     from backend_request_func import get_tokenizer
 except ImportError:
-    from vllm.transformers_utils.tokenizer import get_tokenizer
+    # vLLM moved get_tokenizer from vllm.transformers_utils.tokenizer to
+    # vllm.tokenizers; the old path was a deprecation alias in v0.20 and
+    # was removed by v0.23. Try the new location first, fall back to old.
+    try:
+        from vllm.tokenizers import get_tokenizer
+    except ImportError:
+        from vllm.transformers_utils.tokenizer import get_tokenizer
 
 try:
     from vllm.utils import FlexibleArgumentParser
@@ -110,7 +116,14 @@ def _load_tokenizer(tokenizer_id, tokenizer_mode, trust_remote_code):
         # vllm/vllm-openai:v0.20.0-ubuntu2404). Use vLLM's tokenizer wrapper
         # directly - it ships DSV4-aware code, same path the engine uses
         # when serving with --tokenizer-mode deepseek_v4.
-        from vllm.transformers_utils.tokenizer import get_tokenizer as _vllm_get_tokenizer
+        # New path (vllm.tokenizers) since v0.21/v0.23; old path
+        # (vllm.transformers_utils.tokenizer) for v0.20.
+        try:
+            from vllm.tokenizers import get_tokenizer as _vllm_get_tokenizer
+        except ImportError:
+            from vllm.transformers_utils.tokenizer import (
+                get_tokenizer as _vllm_get_tokenizer,
+            )
         return _vllm_get_tokenizer(
             tokenizer_id,
             tokenizer_mode=tokenizer_mode,
