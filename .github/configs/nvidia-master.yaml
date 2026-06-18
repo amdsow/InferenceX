@@ -8542,7 +8542,7 @@ dsv4-fp4-gb200-llm-d-vllm:
   # startup complete" cleanly; the only remaining issue was bench-side
   # tokenization, fixed by routing tokenizer_mode=deepseek_v4 through
   # vLLM's wrapper instead of stock HF AutoTokenizer.
-  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:vllm0.20
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:vllm0.23
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
   runner: gb200
@@ -8590,7 +8590,7 @@ dsv4-fp4-gb200-llm-d-vllm:
 #     sides (the mid-curve points only fit on HBM with weight-filter).
 #   * max-model-len=9280, decode max-num-seqs=512.
 dsv4-fp4-gb200-llm-d-vllm-mid-curve-megamoe:
-  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:vllm0.20
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:vllm0.23
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
   runner: gb200

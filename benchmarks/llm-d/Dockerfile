@@ -13,11 +13,17 @@
 # iteration does not require an image rebuild. See
 # benchmarks/multi_node/llm-d/job.slurm for the expected mount layout.
 
-ARG VLLM_BASE=vllm/vllm-openai:v0.22.0
+ARG VLLM_BASE=vllm/vllm-openai:v0.23.0
 FROM ${VLLM_BASE}
-# Force-upgrade nvidia-cutlass-dsl so the DSV4 sparse-attention code in
-# vLLM v0.22 finds cute.arch.fmin (the bundled wheel lacks it).
-RUN pip install --no-cache-dir --upgrade nvidia-cutlass-dsl
+# Force-upgrade nvidia-cutlass-dsl only when explicitly requested. The
+# v0.22 base needed it because its bundled wheel lacked cute.arch.fmin
+# for the DSV4 sparse-attention code; stock v0.23.0 (what upstream
+# wide-ep-lws runs) ships a working cutlass, so we leave it untouched
+# there. Build the v0.22 base with --build-arg UPGRADE_CUTLASS_DSL=1.
+ARG UPGRADE_CUTLASS_DSL=0
+RUN if [ "$UPGRADE_CUTLASS_DSL" = "1" ]; then \
+        pip install --no-cache-dir --upgrade nvidia-cutlass-dsl; \
+    fi
 
 
 COPY --from=ghcr.io/llm-d/llm-d-router-endpoint-picker-dev:main \
