@@ -197,6 +197,24 @@ elif [[ "$LLMD_CONTAINER_ENGINE" == "pyxis" ]]; then
     PYXIS_MOUNTS+=",${DI_REPO_DIR}/benchmarks/llm-d/epp-config.yaml:/etc/epp/config.yaml:ro"
     PYXIS_MOUNTS+=",${DI_REPO_DIR}/benchmarks/llm-d/envoy.yaml:/etc/envoy/envoy.yaml:ro"
 
+    # Optional: mount the epp / pd-sidecar / envoy binaries from a shared
+    # filesystem instead of relying on them being baked into the image.
+    # This lets a STOCK vllm/vllm-openai image be used directly (no
+    # combined-image rebuild per vLLM version bump) - see
+    # benchmarks/llm-d/binaries.env + extract-binaries.sh. Each mount is
+    # gated on the file existing, so this is a no-op when the binaries
+    # have not been extracted (the baked-image path keeps working), and
+    # harmless when they have (mounting a binary over the identical one).
+    # shellcheck source=/dev/null
+    [[ -f "${DI_REPO_DIR}/benchmarks/llm-d/binaries.env" ]] && \
+        source "${DI_REPO_DIR}/benchmarks/llm-d/binaries.env"
+    for _bin in epp pd-sidecar envoy; do
+        if [[ -n "${LLMD_BIN_DIR:-}" && -x "${LLMD_BIN_DIR}/${_bin}" ]]; then
+            PYXIS_MOUNTS+=",${LLMD_BIN_DIR}/${_bin}:/usr/local/bin/${_bin}:ro"
+            echo "Mounting ${LLMD_BIN_DIR}/${_bin} -> /usr/local/bin/${_bin}"
+        fi
+    done
+
     # MODEL_DIR / BENCHMARK_LOGS_DIR / NODE_RANK are translated to their
     # in-container values inside bash -lc (host MODEL_DIR is the source
     # path of the bind mount, but server.sh expects /models inside).

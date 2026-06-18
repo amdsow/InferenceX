@@ -26,11 +26,24 @@ RUN if [ "$UPGRADE_CUTLASS_DSL" = "1" ]; then \
     fi
 
 
-COPY --from=ghcr.io/llm-d/llm-d-router-endpoint-picker-dev:main \
+# Source images for the three add-on binaries. Defaults MUST match
+# benchmarks/llm-d/binaries.env, which is the single source of truth (it
+# also drives the mounted-binary path via extract-binaries.sh). Override
+# at build time from that file, e.g.:
+#   source benchmarks/llm-d/binaries.env
+#   docker build \
+#     --build-arg EPP_FROM_IMAGE="$EPP_FROM_IMAGE" \
+#     --build-arg ROUTING_SIDECAR_IMAGE="$ROUTING_SIDECAR_IMAGE" \
+#     --build-arg ENVOY_FROM_IMAGE="$ENVOY_FROM_IMAGE" ...
+ARG EPP_FROM_IMAGE=ghcr.io/llm-d/llm-d-router-endpoint-picker-dev:main
+ARG ROUTING_SIDECAR_IMAGE=ghcr.io/llm-d/llm-d-router-disagg-sidecar-dev:main
+ARG ENVOY_FROM_IMAGE=envoyproxy/envoy:distroless-v1.33.2
+
+COPY --from=${EPP_FROM_IMAGE} \
        /app/epp /usr/local/bin/epp
 
-COPY --from=ghcr.io/llm-d/llm-d-router-disagg-sidecar-dev:main \
+COPY --from=${ROUTING_SIDECAR_IMAGE} \
        /app/pd-sidecar /usr/local/bin/pd-sidecar
 
-COPY --from=envoyproxy/envoy:distroless-v1.33.2 \
+COPY --from=${ENVOY_FROM_IMAGE} \
      /usr/local/bin/envoy /usr/local/bin/
