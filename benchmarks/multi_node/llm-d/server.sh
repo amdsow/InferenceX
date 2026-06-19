@@ -214,10 +214,14 @@ COMMON_ARGS=(
 )
 # --api-server-count is incompatible with --headless (vllm errors out
 # because no API server runs in headless mode). The headless branch
-# below is the only one that drops this; everywhere else keeps the
-# original count=1 behavior.
+# below is the only one that drops this; everywhere else sets it.
+# Bumped 1 -> 4 (2026-06-19): at conc 256-1024 a single frontend process
+# (HTTP + tokenize + detokenize/stream + DP load-balance across 8 ranks)
+# is CPU-bound and caps throughput; the upstream wide-ep-lws owner runs
+# >=4. Overridable via LLMD_API_SERVER_COUNT.
+API_SERVER_COUNT="${LLMD_API_SERVER_COUNT:-4}"
 if [[ "$ROLE_ENABLE_EP" == "true" ]] || [[ "$LWS_GROUP_SIZE" -le 1 ]] || [[ "$LWS_WORKER_INDEX" -eq 0 ]]; then
-    COMMON_ARGS+=(--api-server-count 1)
+    COMMON_ARGS+=(--api-server-count "$API_SERVER_COUNT")
 fi
 # --moe-backend is model-specific (DSR1-FP8 wants deep_gemm, gpt-oss-MXFP4
 # rejects it - see vllm/.../oracle/mxfp4.py:163), so each recipe sets its

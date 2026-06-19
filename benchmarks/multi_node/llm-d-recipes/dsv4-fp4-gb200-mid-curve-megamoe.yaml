@@ -95,18 +95,18 @@ prefill:
   #   - dropped --enable-sleep-mode (carryover from earlier OOM fix; not needed at max-model-len=9280)
   #   - dropped --no-enable-prefix-caching, --no-enable-flashinfer-autotune
   #   - lowered --gpu-memory-utilization 0.95 -> 0.9
-  # Re-added --max-num-batched-tokens 32768 (2026-06-19): the Tier-1 uncap
-  # of the prefill batch ballooned vLLM's activation reservation and shrank
-  # prefill KV cache to 6.56x (60.8k tokens) vs decode's 78x, so prefill
-  # ran 1-at-a-time with ~50 queued while decode sat at 12% KV util
-  # (run 27780656631). Bounding the batch should restore prefill KV and
-  # unblock admission. max-num-seqs left uncapped to isolate this one var.
+  # Re-added --enable-cumem-allocator (2026-06-19): on v0.23+ this puts the
+  # KV cache in cumem memory, which is REQUIRED to transfer KV over MNNVL
+  # (GB200 cross-node NVLink). Without it, cross-node KV falls off the
+  # MNNVL path; combined with UCX_TLS lacking rc that meant TCP transfer
+  # (per upstream wide-ep-lws owner) - the likely cause of the prefill
+  # KV-handoff backup. (Older releases got cumem via --enable-sleep-mode.)
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 9280
-    --max-num-batched-tokens 32768
     --enforce-eager
     --gpu-memory-utilization 0.9
+    --enable-cumem-allocator
     --no-async-scheduling
     --block-size 256
     --tokenizer-mode deepseek_v4
@@ -121,7 +121,11 @@ prefill:
     NCCL_P2P_LEVEL: "NVL"
     UCX_MEMTYPE_CACHE: "n"
     UCX_MEMTYPE_REG_WHOLE: "n"
-    UCX_TLS: "cuda_copy,cuda_ipc,tcp"
+    # Added rc (IB verbs) so cross-node KV falls back to InfiniBand, not
+    # TCP, when MNNVL/cuda_ipc is unavailable. Prior value lacked rc, so
+    # the fallback was tcp (slow). Primary path is still MNNVL via
+    # cuda_ipc + cumem allocator.
+    UCX_TLS: "cuda_copy,cuda_ipc,rc,tcp"
     UCX_CUDA_IPC_ENABLE_MNNVL: "y"
     VLLM_USE_NCCL_SYMM_MEM: "1"
     VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "1024"
@@ -142,6 +146,8 @@ decode:
   #   - dropped --enable-sleep-mode
   #   - dropped --no-enable-prefix-caching, --no-enable-flashinfer-autotune
   #   - lowered --gpu-memory-utilization 0.9 -> 0.85
+  # Re-added --enable-cumem-allocator (2026-06-19): KV cache in cumem is
+  # required for MNNVL KV transfer on v0.23+ (see prefill note).
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 9280
@@ -149,6 +155,7 @@ decode:
     --max-num-batched-tokens 512
     --max-cudagraph-capture-size 512
     --gpu-memory-utilization 0.85
+    --enable-cumem-allocator
     --block-size 256
     --compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}
     --stream-interval 50
@@ -163,7 +170,8 @@ decode:
     NCCL_P2P_LEVEL: "NVL"
     UCX_MEMTYPE_CACHE: "n"
     UCX_MEMTYPE_REG_WHOLE: "n"
-    UCX_TLS: "cuda_copy,cuda_ipc,tcp"
+    # rc added so KV falls back to InfiniBand, not TCP (see prefill note).
+    UCX_TLS: "cuda_copy,cuda_ipc,rc,tcp"
     UCX_CUDA_IPC_ENABLE_MNNVL: "y"
     VLLM_USE_NCCL_SYMM_MEM: "1"
     TILELANG_CLEANUP_TEMP_FILES: "1"
