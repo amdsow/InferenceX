@@ -92,13 +92,19 @@ prefill:
   tp: 1
   enable-expert-parallel: true
   # Tier 1+2 upstream-wide-ep-lws-style tuning (2026-06-16):
-  #   - dropped --max-num-seqs / --max-num-batched-tokens caps (let engine default)
   #   - dropped --enable-sleep-mode (carryover from earlier OOM fix; not needed at max-model-len=9280)
   #   - dropped --no-enable-prefix-caching, --no-enable-flashinfer-autotune
   #   - lowered --gpu-memory-utilization 0.95 -> 0.9
+  # Re-added --max-num-batched-tokens 32768 (2026-06-19): the Tier-1 uncap
+  # of the prefill batch ballooned vLLM's activation reservation and shrank
+  # prefill KV cache to 6.56x (60.8k tokens) vs decode's 78x, so prefill
+  # ran 1-at-a-time with ~50 queued while decode sat at 12% KV util
+  # (run 27780656631). Bounding the batch should restore prefill KV and
+  # unblock admission. max-num-seqs left uncapped to isolate this one var.
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 9280
+    --max-num-batched-tokens 32768
     --enforce-eager
     --gpu-memory-utilization 0.9
     --no-async-scheduling
