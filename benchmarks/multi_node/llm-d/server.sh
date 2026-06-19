@@ -150,6 +150,15 @@ export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-$DEFAULT_IFACE}
 export VLLM_SKIP_P2P_CHECK=1
 export VLLM_RANDOMIZE_DP_DUMMY_INPUTS=1
 export VLLM_USE_DEEP_GEMM=1
+# Cold-start budget for the API server -> engine-core readiness wait.
+# vLLM defaults to 600s. DSV4-Pro on GB200 cold-starts in ~9-11 min:
+# ~3.5 min weight load from Lustre (123 GiB/rank) + ~3 min DeepGEMM JIT
+# warmup (1666 kernels, cold cache) + FULL_DECODE_ONLY cudagraph capture
+# + cross-node NIXL/UCX handshake. With --enable-cumem-allocator the KV
+# allocation goes through the CUDA VMM path, adding a little more. The
+# 600s default leaves no margin (run 27840093779 timed out at exactly
+# 600s while warmup was still finishing), so give it 30 min.
+export VLLM_ENGINE_READY_TIMEOUT_S=${VLLM_ENGINE_READY_TIMEOUT_S:-1800}
 # DeepGEMM JIT-compiles CUDA kernels at warmup and links against
 # libcuda.so.1. In ghcr.io/llm-d/llm-d-cuda the lib lives under
 # /usr/local/cuda/compat/, which is in LD_LIBRARY_PATH (runtime) but
