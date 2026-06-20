@@ -102,21 +102,26 @@ prefill:
   # (per upstream wide-ep-lws owner) - the likely cause of the prefill
   # KV-handoff backup. (Older releases got cumem via --enable-sleep-mode.)
   #
-  # --max-num-batched-tokens 32768 (2026-06-20): single-variable test of the
-  # one prefill knob that diverged from the dynamo-vllm reference recipe
-  # (3148/5336/6036 tok/s/GPU). At ISL 8192 the default 8192 batches one
-  # prefill per step (EPP showed prefill RunningRequestsSize=1,
-  # WaitingQueueSize=177, KV 6.7%), serializing admission at ~4 req/s and
-  # flattening aggregate throughput vs concurrency. 32768 lets prefill batch
-  # ~4 requests per step, matching the reference's prefill token budget. All
-  # other reference deltas (max-num-seqs 16, gpu-mem 0.95, prefix-cache /
-  # flashinfer-autotune disabled) left as-is to isolate this lever.
+  # --max-num-batched-tokens 32768 + --gpu-memory-utilization 0.95
+  # (2026-06-20): test of the prefill batch lever that diverged from the
+  # dynamo-vllm reference recipe (3148/5336/6036 tok/s/GPU). At ISL 8192 the
+  # default 8192 batches one prefill per step (EPP showed prefill
+  # RunningRequestsSize=1, WaitingQueueSize=177, KV 6.7%), serializing
+  # admission at ~4 req/s and flattening aggregate throughput vs concurrency.
+  # 32768 lets prefill batch ~4 requests per step.
+  # These two are coupled, NOT independent: a first attempt with 32768 at
+  # gpu-mem 0.9 OOM'd at engine init ("No available memory for the cache
+  # blocks") because the larger batch's activation reservation left no room
+  # for KV. The reference pairs 32768 with 0.95 for exactly this reason, so
+  # 0.95 is restored here as a prerequisite. Remaining reference deltas
+  # (max-num-seqs 16, prefix-cache / flashinfer-autotune disabled) still left
+  # as-is; if KV is still too tight, those are the next knobs.
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 9280
     --max-num-batched-tokens 32768
     --enforce-eager
-    --gpu-memory-utilization 0.9
+    --gpu-memory-utilization 0.95
     --enable-cumem-allocator
     --no-async-scheduling
     --block-size 256
