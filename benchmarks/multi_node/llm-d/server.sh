@@ -452,6 +452,47 @@ PY
     done
     echo "Prefill vLLM at $PREFILL_LEADER_IP:$VLLM_PORT is ready"
 
+    # ---- Alternative load generator: nyann-bench (set BENCH_TOOL=nyann-bench) ----
+    # Drives the SAME Envoy endpoint as the default benchmark_serving.py sweep,
+    # but with the Go load generator the upstream wide-ep-lws GB200 guide used.
+    # Rationale: nyann-bench documents (and its mock-server table shows) that
+    # Python clients like vllm-bench / benchmark_serving.py plateau at the
+    # CLIENT, not the server, at high concurrency. Our throughput was pinpoint-
+    # flat (~4 req/s) across every server config, the signature of a client-side
+    # cap. This toggle measures the same stack with a Go client that sustains
+    # real concurrency. Default (benchmark_serving) path is untouched. The
+    # vendored static arm64 binary travels with the repo bind-mount at
+    # /workspace (see benchmarks/llm-d/bin/README.md), so no extra mount needed.
+    if [[ "${BENCH_TOOL:-benchmark_serving}" == "nyann-bench" ]]; then
+        NYANN_BIN="${NYANN_BENCH_BIN:-/workspace/benchmarks/llm-d/bin/nyann-bench-linux-arm64}"
+        nyann_dur="${NYANN_DURATION:-120s}"
+        nyann_warmup="${NYANN_WARMUP:-30s}"
+        IFS='x' read -r -a NYANN_CONCS <<< "$BENCH_MAX_CONCURRENCY"
+        for max_concurrency in "${NYANN_CONCS[@]}"; do
+            outdir="$BENCHMARK_LOGS_DIR/nyann_c${max_concurrency}"
+            mkdir -p "$outdir"
+            cfg=$(printf '{"warmup":{"duration":"%s"},"load":{"mode":"concurrent","concurrency":%d,"duration":"%s"},"workload":{"type":"synthetic","isl":%d,"osl":%d}}' \
+                  "$nyann_warmup" "$max_concurrency" "$nyann_dur" "$BENCH_INPUT_LEN" "$BENCH_OUTPUT_LEN")
+            echo "[nyann-bench] conc=$max_concurrency warmup=$nyann_warmup dur=$nyann_dur -> http://127.0.0.1:$ENVOY_PORT/v1"
+            echo "[nyann-bench] config: $cfg"
+            "$NYANN_BIN" generate \
+                --target "http://127.0.0.1:$ENVOY_PORT/v1" \
+                --model "$MODEL_NAME" \
+                --config "$cfg" \
+                --output-dir "$outdir" \
+                2>&1 | tee "$BENCHMARK_LOGS_DIR/${RESULT_FILENAME}_nyann_c${max_concurrency}.log" || \
+                echo "[nyann-bench] conc=$max_concurrency returned non-zero"
+            # Structured stats (matches ${RESULT_FILENAME}_*.json so the result
+            # check sees a result; pulled from the server-logs artifact to analyze).
+            "$NYANN_BIN" analyze --dir "$outdir" --json \
+                > "$BENCHMARK_LOGS_DIR/${RESULT_FILENAME}_nyann_c${max_concurrency}.json" 2>/dev/null || \
+                echo "[nyann-bench] analyze conc=$max_concurrency failed"
+        done
+        echo "[nyann-bench] complete; signaling done, skipping benchmark_serving sweep + eval"
+        touch "$BENCHMARK_LOGS_DIR/.bench_done.$SLURM_JOB_ID"
+        exit 0
+    fi
+
     # ---- Prefill-only microbench (set PREFILL_ONLY_PROBE=true) ----
     # Measures the RAW prefill throughput ceiling by hitting the prefill vLLM
     # DIRECTLY (bypassing Envoy/EPP/sidecar AND the decode instance) with
