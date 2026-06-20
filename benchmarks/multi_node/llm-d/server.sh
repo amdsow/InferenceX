@@ -511,8 +511,21 @@ PY
     done
 
     if [[ "${RUN_EVAL:-false}" == "true" ]]; then
-        run_eval --framework lm-eval --port "$ENVOY_PORT"
-        append_lm_eval_summary
+        # append_lm_eval_summary stages the lm_eval outputs into the current
+        # directory. The vLLM image WORKDIR is /vllm-workspace, which is
+        # container-local and invisible to the host-side workflow steps that
+        # look for results*.json in the repo root (the eval-only result check
+        # in benchmark-multinode-tmpl.yml and validate_scores.py). /workspace
+        # is the bind-mount of that repo root (see job.slurm), so run the
+        # eval from there - otherwise eval-only runs fail the
+        # "no results*.json files found" check even when the eval succeeded.
+        # Subshell keeps the cd local to this block. This is the llm-d path
+        # only; the shared eval glue is correct and left untouched.
+        (
+            cd /workspace
+            run_eval --framework lm-eval --port "$ENVOY_PORT"
+            append_lm_eval_summary
+        )
     fi
 
     # Signal job.slurm (running outside the container, where SLURM
