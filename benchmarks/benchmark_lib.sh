@@ -219,6 +219,7 @@ run_benchmark_serving() {
     local server_pid=""
     local tokenizer=""
     local tokenizer_mode=""
+    local random_prefix_len=0
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -248,6 +249,10 @@ run_benchmark_serving() {
                 ;;
             --random-range-ratio)
                 random_range_ratio="$2"
+                shift 2
+                ;;
+            --random-prefix-len)
+                random_prefix_len="$2"
                 shift 2
                 ;;
             --num-prompts)
@@ -381,6 +386,14 @@ run_benchmark_serving() {
         --result-dir "$result_dir"
         --result-filename "$result_filename.json"
     )
+
+    # Optional shared prefix: prepend a fixed random prefix of N tokens to
+    # every request. With server-side prefix caching enabled this makes the
+    # shared portion a cache hit after warmup, so effective prefill shrinks to
+    # the unique suffix. Only added when > 0; default 0 leaves behavior intact.
+    if [[ "${random_prefix_len:-0}" -gt 0 ]]; then
+        benchmark_cmd+=(--random-prefix-len "$random_prefix_len")
+    fi
 
     if [[ -n "$endpoint" ]]; then
         benchmark_cmd+=(--endpoint "$endpoint")

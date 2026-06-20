@@ -582,6 +582,15 @@ PY
             )
         fi
 
+        # Optional shared-prefix workload (prefix-cache experiment): prepend a
+        # fixed random prefix of BENCH_RANDOM_PREFIX_LEN tokens to every
+        # request. With server-side prefix caching ON, that shared span is a
+        # cache hit after warmup, so effective prefill drops to the unique
+        # suffix (--input-len). Default unset -> normal full-prefill sweep.
+        if [[ "${BENCH_RANDOM_PREFIX_LEN:-0}" -gt 0 ]]; then
+            bench_extra_args+=(--random-prefix-len "$BENCH_RANDOM_PREFIX_LEN")
+        fi
+
         run_benchmark_serving \
             --bench-serving-dir /workspace \
             --tokenizer /models \

@@ -1,0 +1,152 @@
+# DeepSeek-V4-Pro (FP4) on GB200, MegaMOE mid-curve 1P+1D - PREFIX-CACHE
+# experiment variant of dsv4-fp4-gb200-mid-curve-megamoe.yaml.
+#
+# Hypothesis under test: our throughput is pinned at ~4 req/s because every
+# request does a full 8k-token prefill, and prefill compute is the wall
+# (confirmed: prefill-only direct probe also caps ~3.84 req/s). The upstream
+# wide-ep-lws guide may report far higher throughput because its effective
+# prefill is cheap - i.e. a large shared prefix served from the prefix cache.
+#
+# This recipe enables server-side prefix caching (prefix caching is ON here -
+# the --no-enable-prefix-caching flag from the reference-match variant is
+# removed). Paired with BENCH_RANDOM_PREFIX_LEN in the config-key, the bench
+# prepends a fixed shared prefix to every request; after warmup that span is a
+# cache hit, so effective prefill shrinks to the unique suffix. If req/s jumps
+# vs the ~4 req/s baseline, prefill-compute is the wall AND prefix caching is
+# the lever (supporting the upstream-workload explanation of the gap).
+#
+# Engine config is the pre-reference-match baseline (prefix caching ON,
+# default max-num-batched-tokens, gpu-mem 0.9) so the ONLY difference vs our
+# known ~4 req/s baseline run is the shared-prefix workload - clean attribution.
+# Topology unchanged: 1 prefill + 1 decode, TP=1 DP=8 EP=8 DEP8, 16 GPUs.
+#
+# Selected via additional-settings:
+#   CONFIG_FILE=dsv4-fp4-gb200-mid-curve-megamoe-prefixcache.yaml
+#   PREFILL_NODES=2 DECODE_NODES=2 GPUS_PER_NODE=4 BENCH_RANDOM_PREFIX_LEN=7680
+
+# ---- EPP scheduling config ----
+apiVersion: llm-d.ai/v1alpha1
+kind: EndpointPickerConfig
+
+plugins:
+  - name: file-disc
+    type: file-discovery
+    parameters:
+      path: /tmp/endpoints.yaml
+      watchFile: false
+
+  - type: disagg-headers-handler
+  - type: always-disagg-pd-decider
+  - type: disagg-profile-handler
+    parameters:
+      deciderPluginName: always-disagg-pd-decider
+  - type: prefill-filter
+  - type: decode-filter
+  - type: prefix-cache-scorer
+  - type: queue-scorer
+  - type: kv-cache-utilization-scorer
+  - type: active-request-scorer
+  - type: max-score-picker
+
+schedulingProfiles:
+  - name: prefill
+    plugins:
+      - pluginRef: prefill-filter
+      - pluginRef: prefix-cache-scorer
+        weight: 3
+      - pluginRef: queue-scorer
+        weight: 2
+      - pluginRef: kv-cache-utilization-scorer
+        weight: 2
+      - pluginRef: max-score-picker
+  - name: decode
+    plugins:
+      - pluginRef: decode-filter
+      - pluginRef: active-request-scorer
+        weight: 2
+      - pluginRef: prefix-cache-scorer
+        weight: 3
+      - pluginRef: max-score-picker
+
+dataLayer:
+  discovery:
+    pluginRef: file-disc
+
+# ---- Per-role vLLM flags ----
+# Baseline engine config WITH prefix caching ON (no --no-enable-prefix-caching).
+# --enable-cumem-allocator kept (KV in cumem for MNNVL transfer on v0.23+);
+# UCX_TLS includes rc so cross-node KV uses MNNVL/IB, never TCP.
+prefill:
+  tp: 1
+  enable-expert-parallel: true
+  extra-args: >-
+    --kv-cache-dtype fp8
+    --max-model-len 9280
+    --enforce-eager
+    --gpu-memory-utilization 0.9
+    --enable-cumem-allocator
+    --no-async-scheduling
+    --block-size 256
+    --tokenizer-mode deepseek_v4
+    --moe-backend deep_gemm_mega_moe
+    --enable-ep-weight-filter
+    --no-disable-hybrid-kv-cache-manager
+    --numa-bind
+  env:
+    NCCL_CUMEM_ENABLE: "1"
+    NCCL_MNNVL_ENABLE: "1"
+    NCCL_NVLS_ENABLE: "1"
+    NCCL_P2P_LEVEL: "NVL"
+    UCX_MEMTYPE_CACHE: "n"
+    UCX_MEMTYPE_REG_WHOLE: "n"
+    UCX_TLS: "cuda_copy,cuda_ipc,rc,tcp"
+    UCX_CUDA_IPC_ENABLE_MNNVL: "y"
+    VLLM_USE_NCCL_SYMM_MEM: "1"
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "1024"
+    VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE: "2048"
+    TILELANG_CLEANUP_TEMP_FILES: "1"
+    TORCH_SYMMMEM: "NVSHMEM"
+    VLLM_SKIP_P2P_CHECK: "1"
+    VLLM_RANDOMIZE_DP_DUMMY_INPUTS: "1"
+    VLLM_USE_DEEP_GEMM: "1"
+    NVIDIA_GDRCOPY: "enabled"
+    VLLM_HTTP_TIMEOUT_KEEP_ALIVE: "120"
+
+decode:
+  tp: 1
+  enable-expert-parallel: true
+  extra-args: >-
+    --kv-cache-dtype fp8
+    --max-model-len 9280
+    --max-num-seqs 512
+    --max-num-batched-tokens 512
+    --max-cudagraph-capture-size 512
+    --gpu-memory-utilization 0.85
+    --enable-cumem-allocator
+    --block-size 256
+    --compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}
+    --stream-interval 50
+    --tokenizer-mode deepseek_v4
+    --moe-backend deep_gemm_mega_moe
+    --enable-ep-weight-filter
+    --no-disable-hybrid-kv-cache-manager
+  env:
+    NCCL_CUMEM_ENABLE: "1"
+    NCCL_MNNVL_ENABLE: "1"
+    NCCL_NVLS_ENABLE: "1"
+    NCCL_P2P_LEVEL: "NVL"
+    UCX_MEMTYPE_CACHE: "n"
+    UCX_MEMTYPE_REG_WHOLE: "n"
+    UCX_TLS: "cuda_copy,cuda_ipc,rc,tcp"
+    UCX_CUDA_IPC_ENABLE_MNNVL: "y"
+    VLLM_USE_NCCL_SYMM_MEM: "1"
+    TILELANG_CLEANUP_TEMP_FILES: "1"
+    TORCH_SYMMMEM: "NVSHMEM"
+    VLLM_SKIP_P2P_CHECK: "1"
+    VLLM_RANDOMIZE_DP_DUMMY_INPUTS: "1"
+    VLLM_USE_DEEP_GEMM: "1"
+    NVIDIA_GDRCOPY: "enabled"
+
+# ---- SLURM resource directives ----
+slurm:
+  time_limit: "08:00:00"

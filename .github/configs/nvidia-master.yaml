@@ -8716,6 +8716,53 @@ dsv4-fp4-gb200-llm-d-vllm-nyann:
           - "DECODE_NODES=2"
           - "GPUS_PER_NODE=4"
 
+# Prefix-cache experiment variant of dsv4-fp4-gb200-llm-d-vllm-mid-curve-megamoe.
+# Uses the prefix-cache recipe (server-side prefix caching ON) and a
+# shared-prefix workload: BENCH_RANDOM_PREFIX_LEN=7680 prepends a fixed 7680-
+# token prefix to every request, with isl=512 the unique suffix (7680+512=8192
+# total, same as baseline; osl=1024). With caching ON the shared span is a hit
+# after warmup, so effective prefill drops ~16x to the suffix. If req/s jumps
+# vs the ~4 req/s baseline, prefill-compute is the wall and prefix caching is
+# the lever (default benchmark_serving client, ignore_eos forces OSL). Dispatch
+# with --no-evals.
+dsv4-fp4-gb200-llm-d-vllm-prefixcache:
+  image: ghcr.io/ezrasilvera/llm-d-nokube-vllm:vllm0.23
+  model: deepseek-ai/DeepSeek-V4-Pro
+  model-prefix: dsv4
+  runner: gb200
+  precision: fp4
+  framework: llm-d-vllm
+  multinode: true
+  disagg: true
+  scenarios:
+    fixed-seq-len:
+    - isl: 512
+      osl: 1024
+      search-space:
+      - spec-decoding: "none"
+        conc-list: [256, 512, 1024]
+        prefill:
+          num-worker: 1
+          tp: 1
+          ep: 8
+          dp-attn: true
+          additional-settings:
+          - "PREFILL_NODES=2"
+          - "GPUS_PER_NODE=4"
+          - "RANDOM_RANGE_RATIO=0.8"
+          - "CONFIG_FILE=dsv4-fp4-gb200-mid-curve-megamoe-prefixcache.yaml"
+          - "BENCH_NUM_PROMPTS_MULTIPLIER=10"
+          - "MAX_FAILURE_RATE=0.5"
+          - "BENCH_RANDOM_PREFIX_LEN=7680"
+        decode:
+          num-worker: 1
+          tp: 1
+          ep: 8
+          dp-attn: true
+          additional-settings:
+          - "DECODE_NODES=2"
+          - "GPUS_PER_NODE=4"
+
 # MTP2 variant of dsv4-fp4-gb200-dynamo-vllm. Uses the vLLM 0.20.1 image
 # and hand-picked 8k/1k Pareto points mirrored from NVIDIA/srt-slurm.
 dsv4-fp4-gb200-dynamo-vllm-mtp2:
