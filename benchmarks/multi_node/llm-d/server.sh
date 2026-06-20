@@ -452,6 +452,53 @@ PY
     done
     echo "Prefill vLLM at $PREFILL_LEADER_IP:$VLLM_PORT is ready"
 
+    # ---- Prefill-only microbench (set PREFILL_ONLY_PROBE=true) ----
+    # Measures the RAW prefill throughput ceiling by hitting the prefill vLLM
+    # DIRECTLY (bypassing Envoy/EPP/sidecar AND the decode instance) with
+    # output-len 1, so there is no decode generation and no cross-instance
+    # NIXL KV handoff. Diagnostic: the disagg sweep saturates at ~4 req/s with
+    # prefill showing RunningRequestsSize=0 behind a deep queue. If this probe
+    # sustains >> 4 req/s, the wall is the KV-handoff path (NixlConnector),
+    # not prefill compute; if it lands ~4 req/s, prefill compute is the
+    # ceiling. run_benchmark_serving hardcodes base-url to localhost and the
+    # prefill leader is a remote node, so call benchmark_serving.py directly
+    # with a remote --base-url. Reuses the same workload (ISL, range-ratio,
+    # dsv4 chat template) as the disagg sweep for an apples-to-apples rate.
+    if [[ "${PREFILL_ONLY_PROBE:-false}" == "true" ]]; then
+        probe_extra=()
+        if [[ "${MODEL_NAME,,}" == *"deepseek-v4"* ]]; then
+            probe_extra+=(--trust-remote-code --tokenizer-mode deepseek_v4 --use-chat-template --dsv4)
+        fi
+        IFS='x' read -r -a PROBE_CONCS <<< "$BENCH_MAX_CONCURRENCY"
+        for max_concurrency in "${PROBE_CONCS[@]}"; do
+            num_prompts=$(( max_concurrency * BENCH_NUM_PROMPTS_MULTIPLIER ))
+            [[ "$num_prompts" -lt 16 ]] && num_prompts=16
+            echo "[prefill-only probe] conc=$max_concurrency -> http://$PREFILL_LEADER_IP:$VLLM_PORT (ISL=$BENCH_INPUT_LEN, OSL=1)"
+            python3 /workspace/utils/bench_serving/benchmark_serving.py \
+                --model "$MODEL_NAME" \
+                --tokenizer /models \
+                --backend openai \
+                --base-url "http://$PREFILL_LEADER_IP:$VLLM_PORT" \
+                --dataset-name random \
+                --random-input-len "$BENCH_INPUT_LEN" \
+                --random-output-len 1 \
+                --random-range-ratio "$BENCH_RANDOM_RANGE_RATIO" \
+                --num-prompts "$num_prompts" \
+                --max-concurrency "$max_concurrency" \
+                --request-rate inf \
+                --ignore-eos \
+                --save-result \
+                --num-warmups "$max_concurrency" \
+                --percentile-metrics 'ttft,tpot,itl,e2el' \
+                --result-dir "$BENCHMARK_LOGS_DIR/" \
+                --result-filename "${RESULT_FILENAME}_prefillprobe_c${max_concurrency}.json" \
+                "${probe_extra[@]}"
+        done
+        echo "[prefill-only probe] complete; signaling done, skipping disagg sweep + eval"
+        touch "$BENCHMARK_LOGS_DIR/.bench_done.$SLURM_JOB_ID"
+        exit 0
+    fi
+
     # Sweep concurrency. BENCH_MAX_CONCURRENCY arrives from submit.sh as
     # an 'x'-delimited list (e.g. "2048x1024x512"); the runner / sweep
     # configs expect one bench run per level. Same shape as
