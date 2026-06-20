@@ -101,9 +101,20 @@ prefill:
   # MNNVL path; combined with UCX_TLS lacking rc that meant TCP transfer
   # (per upstream wide-ep-lws owner) - the likely cause of the prefill
   # KV-handoff backup. (Older releases got cumem via --enable-sleep-mode.)
+  #
+  # --max-num-batched-tokens 32768 (2026-06-20): single-variable test of the
+  # one prefill knob that diverged from the dynamo-vllm reference recipe
+  # (3148/5336/6036 tok/s/GPU). At ISL 8192 the default 8192 batches one
+  # prefill per step (EPP showed prefill RunningRequestsSize=1,
+  # WaitingQueueSize=177, KV 6.7%), serializing admission at ~4 req/s and
+  # flattening aggregate throughput vs concurrency. 32768 lets prefill batch
+  # ~4 requests per step, matching the reference's prefill token budget. All
+  # other reference deltas (max-num-seqs 16, gpu-mem 0.95, prefix-cache /
+  # flashinfer-autotune disabled) left as-is to isolate this lever.
   extra-args: >-
     --kv-cache-dtype fp8
     --max-model-len 9280
+    --max-num-batched-tokens 32768
     --enforce-eager
     --gpu-memory-utilization 0.9
     --enable-cumem-allocator
