@@ -4048,5 +4048,14 @@
 - config-keys:
     - dsv4-fp4-gb300-dynamo-sglang-1k1k-stp
   description:
+    - "Update SGLang image to nightly-dev-cu13-20260602-98a1b58c"
+    - "Switch MoE backend deepep -> megamoe (prefill in 1p4d/1p6d; prefill+decode in dep8/dep16/dep12/dep48), drop deepep-config"
+    - "Remove obsolete SGLANG_OPT_* / SGLANG_DEEPEP env vars now defaulted upstream (per b300 migration #1506)"
+    - "Clean dynamo recipes: fix container to dsv4-grace-blackwell, drop personal extra_mount and hardcoded nodelist pins"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/1530
+
+- config-keys:
+    - dsv4-fp4-gb300-dynamo-sglang-1k1k-stp
+  description:
     - "Fix dynamo hash: dd37acac -> 81d0555e (old commit no longer exists in dynamo repo)"
   pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/1530

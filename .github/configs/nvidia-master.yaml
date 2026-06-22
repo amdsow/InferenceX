@@ -10918,7 +10918,7 @@ dsv4-fp4-gb300-dynamo-sglang-mtp:
 
 # DSV4 1k1k STP (non-MTP) disagg configs from NVIDIA/srt-slurm#161.
 dsv4-fp4-gb300-dynamo-sglang-1k1k-stp:
-  image: dsv4-grace-blackwell-baizhou-revert
+  image: lmsysorg/sglang:nightly-dev-cu13-20260602-98a1b58c
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
   runner: gb300-cw

@@ -1,6 +1,6 @@
 # 1k1k 1P1D / DEP8 / total 3 nodes
 # conc sweep: 2048, 4096, 8192 (c/4, c/2, c where c = X * 8192)
-# stack: baizhou-revert + sglang-cw-dev (dirty) + dynamo dd37acac04 (locked to PR #130 / job 1350)
+# stack: lmsysorg/sglang nightly-dev-cu13-20260602-98a1b58c (megamoe) + dynamo dd37acac04
 
 name: "disagg-1p1d-dep8-conc8192"
 
@@ -30,7 +30,7 @@ frontend:
 
 model:
   path: dsv4-pro
-  container: "dsv4-grace-blackwell-baizhou-revert"
+  container: "dsv4-grace-blackwell"
   precision: fp4
 
 resources:
@@ -43,10 +43,6 @@ resources:
   decode_workers: 1
   gpus_per_decode: 8
 
-extra_mount:
-- /mnt/home/yangminl/sglang-cw-dev:/sgl-workspace/sglang
-- /mnt/home/yangminl/sglang-cw-dev:/workspace/sglang
-
 backend:
   type: sglang
 
@@ -58,18 +54,8 @@ backend:
     SGLANG_REASONING_EFFORT: max
     SGLANG_OPT_SWA_SPLIT_LEAF_ON_INSERT: '1'
     SGLANG_OPT_SWA_EVICT_DROP_PAGE_MARGIN: '1'
-    SGLANG_OPT_USE_JIT_NORM: '1'
-    SGLANG_OPT_USE_JIT_INDEXER_METADATA: '1'
-    SGLANG_OPT_USE_TOPK_V2: '1'
-    SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2: '1'
-    SGLANG_OPT_USE_DEEPGEMM_MEGA_MOE: '1'
-    SGLANG_OPT_FIX_HASH_MEGA_MOE: '1'
-    SGLANG_OPT_USE_FAST_MASK_EP: '1'
-    SGLANG_OPT_FIX_MEGA_MOE_MEMORY: '1'
     SGLANG_OPT_DEEPGEMM_MEGA_MOE_NUM_MAX_TOKENS_PER_RANK: "8192"
-    SGLANG_OPT_FIX_NEXTN_MEGA_MOE: '1'
     SGLANG_OPT_USE_ONLINE_COMPRESS: "1"
-    SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK: '0'
     NCCL_MNNVL_ENABLE: '1'
     NCCL_CUMEM_ENABLE: '1'
     SGLANG_MOONCAKE_CUSTOM_MEM_POOL: 'True'
@@ -91,17 +77,8 @@ backend:
     SGLANG_REASONING_EFFORT: max
     SGLANG_OPT_SWA_SPLIT_LEAF_ON_INSERT: '1'
     SGLANG_OPT_SWA_EVICT_DROP_PAGE_MARGIN: '1'
-    SGLANG_OPT_USE_JIT_NORM: '1'
-    SGLANG_OPT_USE_JIT_INDEXER_METADATA: '1'
-    SGLANG_OPT_USE_TOPK_V2: '1'
-    SGLANG_OPT_USE_DEEPGEMM_MEGA_MOE: '1'
-    SGLANG_OPT_FIX_HASH_MEGA_MOE: '1'
-    SGLANG_OPT_USE_FAST_MASK_EP: '1'
-    SGLANG_OPT_FIX_MEGA_MOE_MEMORY: '1'
     SGLANG_OPT_DEEPGEMM_MEGA_MOE_NUM_MAX_TOKENS_PER_RANK: '1152'
-    SGLANG_OPT_FIX_NEXTN_MEGA_MOE: '1'
     SGLANG_OPT_USE_ONLINE_COMPRESS: "1"
-    SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK: '0'
     NCCL_MNNVL_ENABLE: '1'
     NCCL_CUMEM_ENABLE: '1'
     SGLANG_MOONCAKE_CUSTOM_MEM_POOL: 'True'
@@ -129,8 +106,7 @@ backend:
       enable-dp-attention: true
       moe-dense-tp-size: 1
       enable-dp-lm-head: true
-      moe-a2a-backend: deepep
-      deepep-config: '{"normal_dispatch":{"num_sms":88,"num_max_nvl_chunked_send_tokens":28,"num_max_nvl_chunked_recv_tokens":512},"normal_combine": {"num_sms":88,"num_max_nvl_chunked_send_tokens":16,"num_max_nvl_chunked_recv_tokens":512}}'
+      moe-a2a-backend: megamoe
       disaggregation-mode: prefill
       disaggregation-transfer-backend: mooncake
       mem-fraction-static: 0.9
@@ -150,8 +126,7 @@ backend:
       enable-dp-attention: true
       enable-dp-lm-head: true
       moe-dense-tp-size: 1
-      moe-a2a-backend: deepep
-      deepep-config: '{"normal_dispatch":{"num_sms":88,"num_max_nvl_chunked_send_tokens":28,"num_max_nvl_chunked_recv_tokens":512},"normal_combine": {"num_sms":88,"num_max_nvl_chunked_send_tokens":16,"num_max_nvl_chunked_recv_tokens":512}}'
+      moe-a2a-backend: megamoe
       disaggregation-mode: decode
       disaggregation-transfer-backend: mooncake
       mem-fraction-static: 0.94
