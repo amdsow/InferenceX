@@ -10921,7 +10921,7 @@ dsv4-fp4-gb300-dynamo-sglang-1k1k-stp:
   image: lmsysorg/sglang:nightly-dev-cu13-20260602-98a1b58c
   model: deepseek-ai/DeepSeek-V4-Pro
   model-prefix: dsv4
-  runner: gb300-nv
+  runner: gb300
   precision: fp4
   framework: dynamo-sglang
   multinode: true
