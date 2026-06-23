@@ -91,48 +91,36 @@ dataLayer:
 prefill:
   tp: 1
   enable-expert-parallel: true
-  # Tier 1+2 upstream-wide-ep-lws-style tuning (2026-06-16):
-  #   - dropped --enable-sleep-mode (carryover from earlier OOM fix; not needed at max-model-len=9280)
-  #   - dropped --no-enable-prefix-caching, --no-enable-flashinfer-autotune
-  #   - lowered --gpu-memory-utilization 0.95 -> 0.9
-  # Re-added --enable-cumem-allocator (2026-06-19): on v0.23+ this puts the
-  # KV cache in cumem memory, which is REQUIRED to transfer KV over MNNVL
-  # (GB200 cross-node NVLink). Without it, cross-node KV falls off the
-  # MNNVL path; combined with UCX_TLS lacking rc that meant TCP transfer
-  # (per upstream wide-ep-lws owner) - the likely cause of the prefill
-  # KV-handoff backup. (Older releases got cumem via --enable-sleep-mode.)
-  #
-  # Prefill now matches the dynamo-vllm reference recipe's prefill config in
-  # full (3148/5336/6036 tok/s/GPU): see
-  # benchmarks/multi_node/srt-slurm-recipes/vllm/deepseek-v4/8k1k/disagg-gb200-mid-curve-megamoe.yaml.
-  # Goal: test whether the prefill batch budget closes the throughput gap.
-  # At ISL 8192 the default max-num-batched-tokens=8192 batched ONE prefill
-  # per step (EPP showed RunningRequestsSize=1, WaitingQueueSize=177, KV
-  # 6.7%), serializing admission at ~4 req/s and flattening throughput vs
-  # concurrency (~2000 tok/s/GPU). 32768 lets prefill batch ~4 per step.
-  # The batch budget could NOT be isolated: 32768 at gpu-mem 0.9 OOM'd on the
-  # KV-block check, and at 0.95 (alone) hit a hard CUDA OOM during warmup
-  # (32768-token activation peak + NCCL/NIXL/DeepGEMM runtime overran 184 GiB).
-  # 32768 only fits with the reference's companion memory-reducers, so they
-  # are restored together as a set:
-  #   - --max-num-batched-tokens 32768  (the prefill batch lever)
-  #   - --gpu-memory-utilization 0.95   (headroom for the larger batch)
-  #   - --max-num-seqs 16               (caps per-seq buffers/block tables)
-  #   - --no-enable-prefix-caching      (random prompts -> ~0 hit; frees KV)
-  #   - --no-enable-flashinfer-autotune (avoids autotune workspace)
-  # --enable-cumem-allocator is the v0.23 equivalent of the reference's
-  # --enable-sleep-mode (KV in cumem for MNNVL transfer).
+  # Upstream-parity strip (2026-06-23): on the upstream wide-ep-lws owner's
+  # advice, dropped the InferenceX-specific prefill customizations so the
+  # engine config matches the guide (which beats us ~3x on the same
+  # workload). Dropped:
+  #   - --max-model-len 9280            (use model default, as upstream)
+  #   - --max-num-seqs 16               (leave uncapped, as upstream)
+  #   - --max-num-batched-tokens 32768  (revert to default 8192, as upstream)
+  #   - --no-enable-flashinfer-autotune (leave autotune ON, as upstream)
+  # KEPT --no-enable-prefix-caching: the upstream vLLM `non-default args` dump
+  # (2026-06-23) shows enable_prefix_caching=False on BOTH prefill and decode,
+  # so upstream runs prefix caching OFF. An earlier note here wrongly claimed
+  # upstream left it ON; that was based on the since-disproven "cacheable
+  # prompts" hypothesis (HANDOFF_upstream_workload_confirmed.md). vLLM V1
+  # defaults prefix caching ON, so we must pass --no-enable-prefix-caching to
+  # match upstream and to keep this a true no-prefix-cache comparison.
+  # --enable-sleep-mode was already replaced by --enable-cumem-allocator,
+  # which is the v0.23 equivalent (KV in cumem, REQUIRED for cross-node MNNVL
+  # KV transfer on GB200) and which upstream ALSO sets - so it stays.
+  # --gpu-memory-utilization reverted 0.95 -> 0.9 to match upstream exactly:
+  # the 0.95 was headroom for the now-removed 32768 batch, so it is no longer
+  # needed. With this, the prefill engine config is at full upstream parity
+  # (only kv_role kv_both vs producer/consumer remains, forced by the no-kube
+  # sidecar topology in server.sh).
   extra-args: >-
     --kv-cache-dtype fp8
-    --max-model-len 9280
-    --max-num-seqs 16
-    --max-num-batched-tokens 32768
     --enforce-eager
-    --gpu-memory-utilization 0.95
+    --gpu-memory-utilization 0.9
     --enable-cumem-allocator
-    --no-async-scheduling
     --no-enable-prefix-caching
-    --no-enable-flashinfer-autotune
+    --no-async-scheduling
     --block-size 256
     --tokenizer-mode deepseek_v4
     --moe-backend deep_gemm_mega_moe
@@ -167,20 +155,21 @@ prefill:
 decode:
   tp: 1
   enable-expert-parallel: true
-  # Tier 1+2 upstream-wide-ep-lws-style tuning (2026-06-16):
-  #   - dropped --enable-sleep-mode
-  #   - dropped --no-enable-prefix-caching, --no-enable-flashinfer-autotune
-  #   - lowered --gpu-memory-utilization 0.9 -> 0.85
-  # Re-added --enable-cumem-allocator (2026-06-19): KV cache in cumem is
-  # required for MNNVL KV transfer on v0.23+ (see prefill note).
+  # Upstream-parity strip (2026-06-23): dropped --max-model-len 9280 to use
+  # the model default, as upstream does. (--no-enable-flashinfer-autotune and
+  # --enable-sleep-mode were already removed in earlier tuning.)
+  # --enable-cumem-allocator stays: required for MNNVL KV transfer on v0.23+
+  # and upstream sets it too. --gpu-memory-utilization 0.85 already matches
+  # upstream. --no-enable-prefix-caching matches upstream decode's
+  # enable_prefix_caching=False (see prefill note).
   extra-args: >-
     --kv-cache-dtype fp8
-    --max-model-len 9280
     --max-num-seqs 512
     --max-num-batched-tokens 512
     --max-cudagraph-capture-size 512
     --gpu-memory-utilization 0.85
     --enable-cumem-allocator
+    --no-enable-prefix-caching
     --block-size 256
     --compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}
     --stream-interval 50

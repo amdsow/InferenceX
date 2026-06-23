@@ -8613,7 +8613,7 @@ dsv4-fp4-gb200-llm-d-vllm-mid-curve-megamoe:
           additional-settings:
           - "PREFILL_NODES=2"
           - "GPUS_PER_NODE=4"
-          - "RANDOM_RANGE_RATIO=0.8"
+          - "RANDOM_RANGE_RATIO=1.0"
           - "CONFIG_FILE=dsv4-fp4-gb200-mid-curve-megamoe.yaml"
           - "BENCH_NUM_PROMPTS_MULTIPLIER=10"
           - "MAX_FAILURE_RATE=0.5"

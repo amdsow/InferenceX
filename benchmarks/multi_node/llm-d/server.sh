@@ -211,7 +211,21 @@ fi
 #     flags are wrong for the single-node-per-instance case where DP is
 #     contained inside one engine process.
 # ----------------------------------------------------------------
-KV_TRANSFER_CONFIG='{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_load_failure_policy":"fail"}'
+# kv_role: the upstream wide-ep-lws guide runs a clean producer/consumer
+# split (prefill=kv_producer, decode=kv_consumer), confirmed from its vLLM
+# `non-default args` dump (2026-06-23). We previously hardcoded kv_both on
+# every rank, which allocates both send+recv KV buffers and is the one
+# remaining serve-line difference vs upstream. Default now mirrors upstream
+# by $ROLE; set KV_ROLE_OVERRIDE=kv_both to fall back to the old behavior
+# if the no-kube pd-sidecar / NIXL handshake turns out to need it.
+if [[ -n "${KV_ROLE_OVERRIDE:-}" ]]; then
+    KV_ROLE="$KV_ROLE_OVERRIDE"
+elif [[ "$ROLE" == "prefill" ]]; then
+    KV_ROLE="kv_producer"
+else
+    KV_ROLE="kv_consumer"
+fi
+KV_TRANSFER_CONFIG="{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"$KV_ROLE\",\"kv_load_failure_policy\":\"fail\"}"
 
 COMMON_ARGS=(
     --port "$VLLM_PORT"
