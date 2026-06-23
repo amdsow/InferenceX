@@ -156,8 +156,8 @@ elif [[ $FRAMEWORK == "dynamo-sglang" && $MODEL_PREFIX == "glm5" ]]; then
 elif [[ $FRAMEWORK == "dynamo-sglang" && $MODEL_PREFIX == "dsv4" ]]; then
     git clone https://github.com/NVIDIA/srt-slurm.git "$SRT_REPO_DIR"
     cd "$SRT_REPO_DIR"
-    # NVIDIA/srt-slurm PR #161 — DSV4 GB300 1k1k STP disagg configs
-    git fetch origin pull/161/head && git checkout FETCH_HEAD
+    mkdir -p recipes/sglang/deepseek-v4
+    cp -rT "$GITHUB_WORKSPACE/benchmarks/multi_node/srt-slurm-recipes/sglang/deepseek-v4" recipes/sglang/deepseek-v4
 elif [[ $FRAMEWORK == "dynamo-vllm" && $MODEL_PREFIX == "minimaxm2.5" && $PRECISION == "fp8" ]]; then
     git clone https://github.com/NVIDIA/srt-slurm.git "$SRT_REPO_DIR"
     cd "$SRT_REPO_DIR"
