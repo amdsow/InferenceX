@@ -245,9 +245,11 @@ default_mounts:
 # Model path aliases
 model_paths:
   "${SRT_SLURM_MODEL_PREFIX}": "${MODEL_PATH}"
+  dsv4-pro: "${MODEL_PATH}"
 containers:
   dynamo-trtllm: ${SQUASH_FILE}
   dynamo-sglang: ${SQUASH_FILE}
+  dsv4-grace-blackwell: ${SQUASH_FILE}
   "${IMAGE}": ${SQUASH_FILE}
   nginx-sqsh: ${NGINX_SQUASH_FILE}
 use_segment_sbatch_directive: false
