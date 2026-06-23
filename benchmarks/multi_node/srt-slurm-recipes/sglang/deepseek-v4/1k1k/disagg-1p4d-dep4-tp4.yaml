@@ -13,8 +13,8 @@ frontend:
     policy: "cache_aware"
 
 model:
-  path: "dsv4-pro"
-  container: "dsv4-grace-blackwell"
+  path: "deepseek-v4-pro"
+  container: "lmsysorg/sglang:nightly-dev-cu13-20260602-98a1b58c"
   precision: "mxfp4"
 
 resources:

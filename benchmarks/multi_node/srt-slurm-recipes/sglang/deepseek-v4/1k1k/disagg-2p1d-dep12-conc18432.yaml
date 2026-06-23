@@ -24,8 +24,8 @@ frontend:
     router-temperature: 0.5
     no-kv-events: true
 model:
-  path: dsv4-pro
-  container: dsv4-grace-blackwell
+  path: "deepseek-v4-pro"
+  container: lmsysorg/sglang:nightly-dev-cu13-20260602-98a1b58c
   precision: fp4
 resources:
   gpu_type: gb300
