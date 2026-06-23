@@ -4095,3 +4095,16 @@
     - "server_atom.sh: fix _MAX_CONC assignment before cudagraph size check; gate ATOM_MOE_GU_ITLV/AITER_BF16_FP8_MOE_BOUND on DeepSeek-V4-Pro only"
     - "Search space: ISL=8192 and ISL=1024, 1P1D TP4, conc 1-512"
   pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/1865
+
+- config-keys:
+    - minimaxm3-fp8-b300-dynamo-vllm
+  description:
+    - "Add MiniMax-M3 MXFP8 B300 disaggregated vLLM benchmarks via Dynamo for 1k1k and 8k1k STP."
+    - "Add local srt-slurm recipes under benchmarks/multi_node/srt-slurm-recipes/vllm/minimax-m3/b300-fp8 and wire the B300 launcher to overlay them into srt-slurm."
+    - "Add right-sized TP4 decode variants with expert parallelism disabled and the Marlin MoE backend for selected low-concurrency 1k1k and 8k1k shapes."
+    - "Colocate the six-GPU TP4 prefill/decode pairs on one B300 node and enable CUDA IPC for NIXL KV transfer."
+    - "Patch the 0618 image's MiniMax M3 MSA prefill top-k slice to be contiguous before CSR construction."
+    - "Align 8k1k expert-parallel settings with the 1k1k recipes and correct the decode CUDA graph capture limit."
+    - "Backport NVIDIA/srt-slurm#38 to sanitize Slurm node-IP discovery output on the pinned submission branch."
+    - "Backport vllm-project/vllm#45879 so NIXL validates heterogeneous-TP KV block lengths using the GQA KV-head ratio."
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/1893
