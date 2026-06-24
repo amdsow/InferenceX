@@ -39,6 +39,13 @@ BENCH_MAX_CONCURRENCY="${BENCH_MAX_CONCURRENCY:-512}"
 DRY_RUN="${DRY_RUN:-0}"
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 
+# AMDSOW Milestone4 wait_health_deep defaults to 7200s. Keep the lightweight
+# container barrier short, but allow cold AITER/Triton/TorchInductor compile +
+# model load + CUDA graph capture to finish on first run.
+CONTAINER_BARRIER_TIMEOUT="${CONTAINER_BARRIER_TIMEOUT:-600}"
+SERVER_STARTUP_TIMEOUT="${SERVER_STARTUP_TIMEOUT:-7200}"
+ROUTER_HEALTH_TIMEOUT="${ROUTER_HEALTH_TIMEOUT:-${SERVER_STARTUP_TIMEOUT}}"
+
 ROUTER_PORT="${ROUTER_PORT:-30000}"
 SERVER_PORT="${SERVER_PORT:-2584}"
 ENGINE_ID="${ENGINE_ID:-${MODEL_NAME}-pd-run}"
@@ -140,27 +147,35 @@ def bash_escape(s):
     \"\"\"Escape a value for safe embedding in a bash double-quoted assignment.\"\"\"
     return s.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"').replace('\$', '\\\\\$').replace('\`', '\\\\\`')
 
-pf = bash_escape(m.get('prefill_flags', '--tensor-parallel-size 8'))
-df = bash_escape(m.get('decode_flags', '--tensor-parallel-size 8'))
-ev = bash_escape(m.get('env', ''))
+pf_raw = m.get('prefill_flags', '--tensor-parallel-size 8')
+df_raw = m.get('decode_flags', '--tensor-parallel-size 8')
+ev_raw = m.get('env', '')
+pf = bash_escape(pf_raw)
+df = bash_escape(df_raw)
+ev = bash_escape(ev_raw)
 dev = bash_escape(m.get('decode_env', ''))
+dpf = bash_escape(m.get('dp8ep_prefill_flags', pf_raw))
+ddf = bash_escape(m.get('dp8ep_decode_flags', df_raw))
+dpev = bash_escape(m.get('dp8ep_env', ev_raw))
+dpdev = bash_escape(m.get('dp8ep_decode_env', ''))
 print(f'PREFILL_SERVER_CONFIG=\"{pf}\"')
 print(f'DECODE_SERVER_CONFIG=\"{df}\"')
 print(f'MODEL_ENVS=\"{ev}\"')
 print(f'DECODE_MODEL_ENVS=\"{dev}\"')
+print(f'DP8EP_PREFILL_SERVER_CONFIG=\"{dpf}\"')
+print(f'DP8EP_DECODE_SERVER_CONFIG=\"{ddf}\"')
+print(f'DP8EP_MODEL_ENVS=\"{dpev}\"')
+print(f'DP8EP_DECODE_MODEL_ENVS=\"{dpdev}\"')
 ")"
 
 echo "Loaded model configuration for: $MODEL_NAME"
 
 # Apply parallelism flags from the submit pipeline.
 #
-# DP8EP ("EP8") layout: data-parallel across the node's GPUs with expert-parallel
-# over the DP ranks via MoRI all2all and TP=1. This is vLLM's data-parallel path
-# (NOT SGLang's --enable-dp-attention) and mirrors the AMDSOW reference
-# VLLM_DP8EP_FLAGS (exp_common.sh): the tensor-parallel flag is replaced with
-# `--tensor-parallel-size 1 --data-parallel-size <gpus> --enable-expert-parallel
-# --all2all-backend mori`. Triggered per role by PREFILL_DP8EP / DECODE_DP8EP
-# (true|1); the branch is self-contained and takes precedence over TP/EP/DP.
+# TP8 and DP8EP are distinct AMDSOW Milestone4 profiles. DP8EP is NOT a regex
+# mutation of the TP8 flag string: it has its own block-size/model-len/batched-
+# token policy, no TP8 pass_config, no Quick Reduce, and shared-experts=0. The
+# role booleans come from amd-master.yaml additional-settings.
 PREFILL_DP8EP="${PREFILL_DP8EP:-false}"
 DECODE_DP8EP="${DECODE_DP8EP:-false}"
 DP8EP_ALL2ALL_BACKEND="${DP8EP_ALL2ALL_BACKEND:-mori}"
@@ -173,13 +188,13 @@ _dp8ep_flags() {
         "$1" "${DP8EP_ALL2ALL_BACKEND}"
 }
 
+PREFILL_ROLE_ENVS="${MODEL_ENVS}"
+DECODE_ROLE_ENVS="${MODEL_ENVS} ${DECODE_MODEL_ENVS}"
+
 # Prefill side
 if _dp8ep_enabled "$PREFILL_DP8EP"; then
-    if echo "$PREFILL_SERVER_CONFIG" | grep -q -- '--tensor-parallel-size'; then
-        PREFILL_SERVER_CONFIG=$(echo "$PREFILL_SERVER_CONFIG" | sed -E "s/--tensor-parallel-size[[:space:]]+[0-9]+/$(_dp8ep_flags "${GPUS_PER_NODE:-8}")/")
-    else
-        PREFILL_SERVER_CONFIG+=" $(_dp8ep_flags "${GPUS_PER_NODE:-8}")"
-    fi
+    PREFILL_SERVER_CONFIG="${DP8EP_PREFILL_SERVER_CONFIG} $(_dp8ep_flags "${GPUS_PER_NODE:-8}")"
+    PREFILL_ROLE_ENVS="${DP8EP_MODEL_ENVS}"
 else
     if [[ -n "${PREFILL_TP_SIZE:-}" ]]; then
         if echo "$PREFILL_SERVER_CONFIG" | grep -q -- '--tensor-parallel-size'; then
@@ -198,11 +213,8 @@ fi
 
 # Decode side
 if _dp8ep_enabled "$DECODE_DP8EP"; then
-    if echo "$DECODE_SERVER_CONFIG" | grep -q -- '--tensor-parallel-size'; then
-        DECODE_SERVER_CONFIG=$(echo "$DECODE_SERVER_CONFIG" | sed -E "s/--tensor-parallel-size[[:space:]]+[0-9]+/$(_dp8ep_flags "${GPUS_PER_NODE:-8}")/")
-    else
-        DECODE_SERVER_CONFIG+=" $(_dp8ep_flags "${GPUS_PER_NODE:-8}")"
-    fi
+    DECODE_SERVER_CONFIG="${DP8EP_DECODE_SERVER_CONFIG} $(_dp8ep_flags "${GPUS_PER_NODE:-8}")"
+    DECODE_ROLE_ENVS="${DP8EP_MODEL_ENVS} ${DP8EP_DECODE_MODEL_ENVS}"
 else
     if [[ -n "${DECODE_TP_SIZE:-}" ]]; then
         if echo "$DECODE_SERVER_CONFIG" | grep -q -- '--tensor-parallel-size'; then
@@ -244,7 +256,7 @@ python3 $WS_PATH/sync.py barrier \
     --node-ips ${IPADDRS} \
     --node-ports 5000 \
     --wait-for-all-ports \
-    --timeout 600
+    --timeout ${CONTAINER_BARRIER_TIMEOUT}
 
 # =============================================================================
 # Cluster Topology Configuration
@@ -268,12 +280,12 @@ echo "Decode  node IPs: ${DECODE_ARGS}"
 # MoRI-IO proxy ZMQ registration port (must match vllm-router --vllm-discovery-address)
 PROXY_PING_PORT="${PROXY_PING_PORT:-36367}"
 
-# MoRIIO connector extra config: caller-supplied knobs (read_mode,
-# allow_full_cudagraph, ...) merged with the standard proxy endpoints below.
-# Defaults enable the proven read_mode + full-cudagraph knobs. Must be EXPORTED
-# so the python builders read it via os.environ; the default is held in its own
-# var to avoid the ${VAR:-{...}} nested-brace parse that appends a stray '}'.
-_MORI_KV_EXTRA_DEFAULT='{"read_mode":true,"allow_full_cudagraph":true}'
+# MoRIIO connector extra config: caller-supplied knobs merged with the standard
+# proxy endpoints below. Defaults mirror AMDSOW Milestone4 exp_common.sh:
+# read mode, queue/post-batch/worker/inflight/dispatch sizing, and full CUDA graph.
+# Must be EXPORTED so the python builders read it via os.environ; the default is
+# held in its own var to avoid nested-brace ${VAR:-...} parsing bugs.
+_MORI_KV_EXTRA_DEFAULT='{"read_mode":true,"qp_per_transfer":4,"post_batch_size":2,"num_workers":1,"handshake_timeout":120,"max_inflight_global":16,"max_inflight_per_transfer":4,"max_dispatch_layers":4,"allow_full_cudagraph":true}'
 export MORI_KV_EXTRA_CONFIG_JSON="${MORI_KV_EXTRA_CONFIG_JSON:-$_MORI_KV_EXTRA_DEFAULT}"
 
 KV_TRANSFER_CONFIG_BASE=$(python3 -c "
@@ -300,9 +312,11 @@ KV_TRANSFER_CONFIG_CONSUMER=$(build_kv_config kv_consumer)
 
 # vLLM runtime environment (static vars moved to env.sh; these depend on per-node state)
 setup_vllm_env() {
+    local role_envs="${1:-${MODEL_ENVS}}"
     export VLLM_NIXL_SIDE_CHANNEL_HOST=${rdma_ip}
     export VLLM_NIXL_SIDE_CHANNEL_PORT=5600
-    for env_pair in ${MODEL_ENVS}; do
+    for env_pair in ${role_envs}; do
+        [[ -n "${env_pair}" ]] || continue
         export "$env_pair"
     done
 }
@@ -327,7 +341,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "Decode  servers: ${DECODE_ARGS}"
     echo "================================================"
 
-    setup_vllm_env
+    setup_vllm_env "${PREFILL_ROLE_ENVS}"
 
     # Router is started as an external container by job.slurm (VLLM_ROUTER_IMAGE)
     echo "Using external vllm-router container (started by job.slurm on this node)"
@@ -358,7 +372,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
             --node-ips ${IPADDRS} \
             --node-ports $SERVER_PORT \
             --wait-for-all-ports \
-            --timeout 1800
+            --timeout ${SERVER_STARTUP_TIMEOUT}
     fi
 
     echo "Congratulations!!! All prefill and decode servers are up . . ."
@@ -369,7 +383,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
         --node-ports ${ROUTER_PORT} \
         --wait-for-all-health \
         --health-endpoint /health \
-        --timeout 1800"
+        --timeout ${ROUTER_HEALTH_TIMEOUT}"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "DRY RUN: $HEALTH_BARRIER_CMD"
@@ -501,7 +515,7 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -lt "$xP" ]; then
     echo "${host_name}:${host_ip} is Additional Prefill Node (Model: ${MODEL_NAME})"
     echo "Using prefill config: $PREFILL_SERVER_CONFIG"
 
-    setup_vllm_env
+    setup_vllm_env "${PREFILL_ROLE_ENVS}"
 
     SERVED_MODEL="${MODEL_NAME}"
     PREFILL_CMD="vllm serve ${MODEL_PATH} \
@@ -526,7 +540,7 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -lt "$xP" ]; then
         --node-ips ${NODE0_ADDR} \
         --node-ports ${ROUTER_PORT} \
         --wait-for-all-ports \
-        --timeout 1800"
+        --timeout ${ROUTER_HEALTH_TIMEOUT}"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "DRY RUN: $BARRIER_CMD"
@@ -552,12 +566,7 @@ else
     echo "${host_name}:${host_ip} is Decode Node (Model: ${MODEL_NAME})"
     echo "Using decode config: $DECODE_SERVER_CONFIG"
 
-    setup_vllm_env
-
-    for env_pair in ${DECODE_MODEL_ENVS}; do
-        export "$env_pair"
-        echo "[DECODE_ENV] $env_pair"
-    done
+    setup_vllm_env "${DECODE_ROLE_ENVS}"
 
     SERVED_MODEL="${MODEL_NAME}"
     DECODE_CMD="vllm serve ${MODEL_PATH} \
@@ -582,7 +591,7 @@ else
         --node-ips ${NODE0_ADDR} \
         --node-ports ${ROUTER_PORT} \
         --wait-for-all-ports \
-        --timeout 1800"
+        --timeout ${ROUTER_HEALTH_TIMEOUT}"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "DRY RUN: $BARRIER_CMD"

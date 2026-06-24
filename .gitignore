@@ -3,3 +3,9 @@
 experimental/multiturn/vllm_benchmark/results/
 .venv/
 AMDSOW_CLUSTER_NOTES.md
+
+# AMDSOW local regression run artifacts (not for upstream)
+.regression_env.sh
+/benchmark_logs/
+/validation_*.json
+/collect_latest_results.py

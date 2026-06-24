@@ -47,6 +47,7 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
     export MORI_RDMA_DEVICES="${AMDSOW_MORI_RDMA_DEVICES:-$IBDEVICES}"
     export MORI_RDMA_TC=104
     export GPUS_PER_NODE=8
+    export RUNNER_NAME="${RUNNER_NAME:-mi300x-disagg-validation}"
 
     export ISL="$ISL"
     export OSL="$OSL"
@@ -83,6 +84,11 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
         BENCHMARK_SUBDIR="single_node/fixed_seq_len"
     fi
     JOB_ID=$(bash "benchmarks/${BENCHMARK_SUBDIR}/${SCRIPT_NAME}")
+
+    if [[ "${SUBMIT_DRY_RUN:-0}" == "1" ]]; then
+        echo "SUBMIT_DRY_RUN=1: launcher exiting after submit dry-run (${JOB_ID})"
+        exit 0
+    fi
 
     LOG_FILE="$BENCHMARK_LOGS_DIR/slurm_job-${JOB_ID}.out"
     sleep 10

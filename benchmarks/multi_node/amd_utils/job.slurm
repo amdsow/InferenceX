@@ -314,6 +314,26 @@ export RESULT_FILENAME="${RESULT_FILENAME:-}"
 export SPEC_DECODING="${SPEC_DECODING:-}"
 export IS_MULTINODE="${IS_MULTINODE:-false}"
 
+# AMDSOW Milestone4 vLLM runs use persistent per-image JIT/cache dirs. This is
+# required for AITER/Triton/TorchInductor ABI-consistent runtime artifacts; using
+# image-baked aiter/jit/*.so directly can hit torch/c10 undefined-symbol errors.
+_cache_tag() { echo "$1" | sed 's|[/:]|-|g' | grep -oP '.{0,40}$'; }
+export PERSIST_JIT_CACHE="${PERSIST_JIT_CACHE:-1}"
+export JIT_CLEAN_STALE_LOCKS="${JIT_CLEAN_STALE_LOCKS:-1}"
+export JIT_CACHE_HOST_ROOT="${JIT_CACHE_HOST_ROOT:-/tmp/amdsow-jit-cache}"
+export JIT_CACHE_KEY="${JIT_CACHE_KEY:-$(_cache_tag "${DOCKER_IMAGE_NAME}")}"
+if [[ "$ENGINE" == "vllm-disagg" && "$PERSIST_JIT_CACHE" == "1" ]]; then
+    export AITER_JIT_DIR="${AITER_JIT_DIR:-/jit-cache/aiter}"
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/jit-cache/triton}"
+    export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/jit-cache/torchinductor}"
+    export MORI_JIT_CACHE_DIR="${MORI_JIT_CACHE_DIR:-/jit-cache/mori}"
+    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/jit-cache/vllm}"
+    JIT_CACHE_DOCKER_MOUNTS="-v ${JIT_CACHE_HOST_ROOT}/${JIT_CACHE_KEY}/aiter:/jit-cache/aiter -v ${JIT_CACHE_HOST_ROOT}/${JIT_CACHE_KEY}/triton:/jit-cache/triton -v ${JIT_CACHE_HOST_ROOT}/${JIT_CACHE_KEY}/torchinductor:/jit-cache/torchinductor -v ${JIT_CACHE_HOST_ROOT}/${JIT_CACHE_KEY}/mori:/jit-cache/mori -v ${JIT_CACHE_HOST_ROOT}/${JIT_CACHE_KEY}/vllm:/jit-cache/vllm"
+else
+    JIT_CACHE_DOCKER_MOUNTS=""
+fi
+export JIT_CACHE_DOCKER_MOUNTS
+
 SANITIZED_USER=$(echo "$USER_NAME" | tr -c 'a-zA-Z0-9_.-' '_')
 export DOCKER_CONT_NAME="container_${ENGINE}_${SANITIZED_USER}_${MODEL_NAME}_${SLURM_JOB_ID}"
 
@@ -342,6 +362,25 @@ srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
     echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null 2>&1 || true
     echo "NFS cache refreshed on $(hostname)"
 '
+
+if [[ "$ENGINE" == "vllm-disagg" && "$PERSIST_JIT_CACHE" == "1" ]]; then
+    echo "Preparing persistent JIT caches on selected nodes: ${JIT_CACHE_HOST_ROOT}/${JIT_CACHE_KEY}"
+    srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
+        set -euo pipefail
+        JIT_CACHE_DIR="${JIT_CACHE_HOST_ROOT}/${JIT_CACHE_KEY}"
+        mkdir -p "${JIT_CACHE_DIR}/aiter" "${JIT_CACHE_DIR}/triton" "${JIT_CACHE_DIR}/torchinductor" "${JIT_CACHE_DIR}/mori" "${JIT_CACHE_DIR}/vllm"
+        if [[ "${JIT_CLEAN_STALE_LOCKS:-1}" == "1" ]]; then
+            # JIT cache files are created by the root-running container, so the
+            # unprivileged srun user cannot delete stale locks without sudo.
+            # Mirrors AMDSOW Milestone4 cleanup_persistent_jit_locks_node().
+            removed=$(sudo find "${JIT_CACHE_DIR}" -type f \( -name "lock" -o -name ".lock" -o -name "lock_*" -o -name "*.lock" \) -print -delete 2>/dev/null | wc -l || true)
+            if [[ "${removed//[[:space:]]/}" != "0" ]]; then
+                echo "[jit-cache] removed ${removed//[[:space:]]/} stale lock file(s) under ${JIT_CACHE_DIR} on $(hostname)"
+            fi
+        fi
+        echo "[jit-cache] ready ${JIT_CACHE_DIR} on $(hostname)"
+    '
+fi
 
 # =============================================================================
 # Build engine-specific Docker environment variables
@@ -411,6 +450,11 @@ if [[ "$ENGINE" == "vllm-disagg" ]]; then
         -e HSA_ENABLE_SDMA=1
         -e PROXY_STREAM_IDLE_TIMEOUT=\${PROXY_STREAM_IDLE_TIMEOUT:-300}
         -e VLLM_MORIIO_CONNECTOR_READ_MODE=\${VLLM_MORIIO_CONNECTOR_READ_MODE:-1}
+        -e AITER_JIT_DIR=${AITER_JIT_DIR:-}
+        -e TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-}
+        -e TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-}
+        -e MORI_JIT_CACHE_DIR=${MORI_JIT_CACHE_DIR:-}
+        -e VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-}
         -e PYTHONPYCACHEPREFIX=/tmp/pycache
     )
 elif [[ "$ENGINE" == "atom-disagg" ]]; then
@@ -534,6 +578,7 @@ fi  # end: if ENGINE == atom-disagg
 \$DOCKER_CMD ps -aq --filter \"$CONT_FILTER\" | xargs -r \$DOCKER_CMD rm -f || true
 \$DOCKER_CMD ps -aq | xargs -r \$DOCKER_CMD stop || true
 
+
 # Start vLLM external router container on node 0
 if [[ \"$ENGINE\" == \"vllm-disagg\" && \"$ROUTER_TYPE\" == \"vllm-router\" && \"\$SLURM_PROCID\" == \"0\" ]]; then
     \$DOCKER_CMD rm -f \"$ROUTER_CONT_NAME\" 2>/dev/null || true
@@ -580,21 +625,26 @@ fi
     --device=/dev/infiniband/uverbs7 \
     --ulimit memlock=-1 \
     --ulimit stack=67108864 \
+    --ulimit nofile=1048576:1048576 \
     --network host \
     --ipc host \
     --group-add video \
+    --cap-add SYS_ADMIN \
+    --cap-add IPC_LOCK \
     --cap-add SYS_PTRACE \
     --security-opt seccomp=unconfined \
     --privileged \
+    --shm-size 192G \
     -v /sys:/sys \
+    -v /dev/shm:/dev/shm \
     $(command -v nicctl >/dev/null 2>&1 && echo "-v $(which nicctl):/usr/sbin/nicctl") \
     -v ${MODEL_DIR}:/models \
     -v \$HOME/.ssh:/root/.ssh \
-    --shm-size 128G \
     -v /tmp:/run_logs \
     -v ${BENCHMARK_LOGS_DIR}:/benchmark_logs \
     -v ${DI_REPO_DIR}:${DOCKER_MOUNT_PATH} \
     ${EXTRA_DOCKER_MOUNTS:-} \
+    ${JIT_CACHE_DOCKER_MOUNTS:-} \
     \${RDMA_MOUNTS[@]+"\${RDMA_MOUNTS[@]}"} \
     ${DOCKER_ENV_COMMON[*]} \
     ${DOCKER_ENV_ENGINE[*]} \
