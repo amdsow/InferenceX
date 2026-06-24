@@ -11,6 +11,16 @@ sbatch_directives:
   cpus-per-task: '144'
   mem: '0'
 
+# Backend workers build dynamo from source; that install runs
+# `apt-get install libclang-dev`, which needs root. Run the worker container
+# as remapped root so dpkg works (pyxis maps container-root back to the
+# invoking user on the host, so files on mounted dirs stay caller-owned).
+# Without this, workers run non-root and the install dies with exit 100
+# (`dpkg: requested operation requires superuser privilege`), hidden by the
+# install's `> /dev/null 2>&1`.
+srun_options:
+  container-remap-root: ""
+
 dynamo:
   hash: "81d0555ee23519cea80a42b4fe824e30368b7300"
   install: true
