@@ -220,7 +220,7 @@ After the run finishes:
 
 ```bash
 gh run download "$RUN_ID" --repo "$REPO" --pattern 'bmk_*' --dir artifacts
-gh run download "$RUN_ID" --repo "$REPO" --pattern 'multinode_server_logs_*' --dir artifacts
+gh run download "$RUN_ID" --repo "$REPO" --pattern 'multinode_server_logs_*' --dir artifacts || true
 gh run download "$RUN_ID" --repo "$REPO" -n results_bmk --dir artifacts
 gh run download "$RUN_ID" --repo "$REPO" -n run-stats --dir artifacts
 ```
