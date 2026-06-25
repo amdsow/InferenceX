@@ -1,3 +1,30 @@
+<div class="cover">
+  <img class="cover-logo" src="mangoboost-logo.png" alt="MangoBoost logo">
+  <div class="cover-org">MangoBoost</div>
+  <div class="cover-title">AMDSOW InferenceX project detail</div>
+  <div class="cover-title2">Config, workflow, Slurm, Docker, and vLLM wiring</div>
+  <div class="cover-sub">AMDSOW InferenceX DeepSeek-R1-0528 FP8 MI300X vLLM PD-disaggregation validation package</div>
+  <div class="cover-conf">Confidential. Shared with AMD under NDA. &nbsp;|&nbsp; contact@mangoboost.io</div>
+</div>
+<div class="pagebreak"></div>
+
+**Document control**
+
+| Field | Value |
+|---|---|
+| Document | AMDSOW InferenceX project detail |
+| Version | v1.0.0 |
+| Last updated | 2026-06-25 |
+| Owner | MangoBoost AMDSOW delivery team |
+| Contact | contact@mangoboost.io |
+| Audience | Maintainers, delivery owners, and package reviewers |
+| Status | Generated A4 PDF from maintained AMDSOW InferenceX Markdown documentation |
+| Source format | Maintained Markdown rendered through HTML/CSS with Python-Markdown and WeasyPrint. |
+
+<div class="pagebreak"></div>
+
+[TOC]
+
 # AMDSOW InferenceX project description and detail
 
 This document explains how the AMDSOW DeepSeek-R1-0528 FP8 MI300X vLLM PD-disaggregation

@@ -1,3 +1,30 @@
+<div class="cover">
+  <img class="cover-logo" src="mangoboost-logo.png" alt="MangoBoost logo">
+  <div class="cover-org">MangoBoost</div>
+  <div class="cover-title">AMDSOW InferenceX documentation set</div>
+  <div class="cover-title2">Start here, choose the right guide, then run the benchmark</div>
+  <div class="cover-sub">AMDSOW InferenceX DeepSeek-R1-0528 FP8 MI300X vLLM PD-disaggregation validation package</div>
+  <div class="cover-conf">Confidential. Shared with AMD under NDA. &nbsp;|&nbsp; contact@mangoboost.io</div>
+</div>
+<div class="pagebreak"></div>
+
+**Document control**
+
+| Field | Value |
+|---|---|
+| Document | AMDSOW InferenceX documentation set |
+| Version | v1.0.0 |
+| Last updated | 2026-06-25 |
+| Owner | MangoBoost AMDSOW delivery team |
+| Contact | contact@mangoboost.io |
+| Audience | AMD/customer operators, solution engineers, maintainers, and package reviewers |
+| Status | Generated A4 PDF from maintained AMDSOW InferenceX Markdown documentation |
+| Source format | Maintained Markdown rendered through HTML/CSS with Python-Markdown and WeasyPrint. |
+
+<div class="pagebreak"></div>
+
+[TOC]
+
 # AMDSOW InferenceX onboarding
 
 Start here if you are seeing this repository for the first time.

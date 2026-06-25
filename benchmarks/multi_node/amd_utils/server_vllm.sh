@@ -188,6 +188,27 @@ _dp8ep_flags() {
         "$1" "${DP8EP_ALL2ALL_BACKEND}"
 }
 
+# Replace or append --block-size from per-row additional-settings.
+_apply_block_size_override() {
+    local config="$1"
+    local block_size="$2"
+    local role="$3"
+
+    if [[ -z "${block_size:-}" ]]; then
+        printf '%s' "$config"
+        return
+    fi
+    if [[ ! "$block_size" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: ${role}_BLOCK_SIZE must be an integer, got '${block_size}'" >&2
+        exit 1
+    fi
+    if printf '%s' "$config" | grep -q -- '--block-size'; then
+        printf '%s' "$config" | sed -E "s/--block-size[[:space:]]+[0-9]+/--block-size ${block_size}/g"
+    else
+        printf '%s --block-size %s' "$config" "$block_size"
+    fi
+}
+
 PREFILL_ROLE_ENVS="${MODEL_ENVS}"
 DECODE_ROLE_ENVS="${MODEL_ENVS} ${DECODE_MODEL_ENVS}"
 
@@ -230,6 +251,11 @@ else
         DECODE_SERVER_CONFIG+=" --enable-dp-attention"
     fi
 fi
+
+# Optional per-row block-size overrides. Used by AMDSOW c256 to keep TP8 prefill
+# and DP8EP decode on the same MoRIIO KV block size without changing other rows.
+PREFILL_SERVER_CONFIG="$(_apply_block_size_override "$PREFILL_SERVER_CONFIG" "${PREFILL_BLOCK_SIZE:-}" "PREFILL")"
+DECODE_SERVER_CONFIG="$(_apply_block_size_override "$DECODE_SERVER_CONFIG" "${DECODE_BLOCK_SIZE:-}" "DECODE")"
 
 # MTP speculative decoding. vLLM deepseek_mtp requires the spec config on BOTH
 # producer (prefill) and consumer (decode) so MTP layers match across the PD pair

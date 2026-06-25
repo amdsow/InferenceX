@@ -1,3 +1,30 @@
+<div class="cover">
+  <img class="cover-logo" src="mangoboost-logo.png" alt="MangoBoost logo">
+  <div class="cover-org">MangoBoost</div>
+  <div class="cover-title">AMDSOW InferenceX user guide</div>
+  <div class="cover-title2">Operator workflow and manual Slurm runbook</div>
+  <div class="cover-sub">AMDSOW InferenceX DeepSeek-R1-0528 FP8 MI300X vLLM PD-disaggregation validation package</div>
+  <div class="cover-conf">Confidential. Shared with AMD under NDA. &nbsp;|&nbsp; contact@mangoboost.io</div>
+</div>
+<div class="pagebreak"></div>
+
+**Document control**
+
+| Field | Value |
+|---|---|
+| Document | AMDSOW InferenceX user guide |
+| Version | v1.0.0 |
+| Last updated | 2026-06-25 |
+| Owner | MangoBoost AMDSOW delivery team |
+| Contact | contact@mangoboost.io |
+| Audience | AMD/customer operators and solution engineers |
+| Status | Generated A4 PDF from maintained AMDSOW InferenceX Markdown documentation |
+| Source format | Maintained Markdown rendered through HTML/CSS with Python-Markdown and WeasyPrint. |
+
+<div class="pagebreak"></div>
+
+[TOC]
+
 # AMDSOW InferenceX user guide
 
 This guide is for the operator who needs to run the AMDSOW DeepSeek-R1-0528 FP8 MI300X vLLM prefill/decode benchmark through **InferenceX**.

@@ -387,6 +387,9 @@ fi
 # =============================================================================
 
 # Common env vars (always passed)
+export PREFILL_BLOCK_SIZE="${PREFILL_BLOCK_SIZE:-}"
+export DECODE_BLOCK_SIZE="${DECODE_BLOCK_SIZE:-}"
+
 DOCKER_ENV_COMMON=(
     -e SLURM_JOB_ID=\$SLURM_JOB_ID
     -e SLURM_JOB_NODELIST=\$SLURM_JOB_NODELIST
@@ -427,6 +430,8 @@ DOCKER_ENV_COMMON=(
     -e DECODE_MTP_SIZE=\$DECODE_MTP_SIZE
     -e PREFILL_DP8EP=\$PREFILL_DP8EP
     -e DECODE_DP8EP=\$DECODE_DP8EP
+    -e PREFILL_BLOCK_SIZE=\$PREFILL_BLOCK_SIZE
+    -e DECODE_BLOCK_SIZE=\$DECODE_BLOCK_SIZE
     -e IS_MULTINODE=\$IS_MULTINODE
 )
 
