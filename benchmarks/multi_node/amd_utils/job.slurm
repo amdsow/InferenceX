@@ -593,17 +593,36 @@ if [[ \"$ENGINE\" == \"vllm-disagg\" && \"$ROUTER_TYPE\" == \"vllm-router\" && \
             --vllm-discovery-address 0.0.0.0:${PROXY_PING_PORT} \
             --port ${ROUTER_PORT} \
             --host 0.0.0.0 \
+            --max-concurrent-requests 4096 \
+            --request-timeout-secs 1800 \
             --policy consistent_hash \
             --prefill-policy consistent_hash \
             --decode-policy consistent_hash \
             --log-level info 2>&1 | tee /run_logs/slurm_job-${SLURM_JOB_ID}/vllm_router_\$(hostname).log \"
 fi
 
+# Start MoRIIO toy proxy container on node 0 (ROUTER_TYPE=moriio).
+# The InfX harness natively launches only the Rust vllm-router; this mirrors
+# that launch using the in-image Python toy proxy (examples/), which carries
+# the hypercorn high-concurrency-burst fix + flat-interleaved DP routing.
+# Serves HTTP on ROUTER_PORT (bench target); ZMQ service discovery is hardcoded
+# to 36367 in the proxy, matching PROXY_PING_PORT that prefill/decode register to.
+if [[ \"$ENGINE\" == \"vllm-disagg\" && \"$ROUTER_TYPE\" == \"moriio\" && \"\$SLURM_PROCID\" == \"0\" ]]; then
+    \$DOCKER_CMD rm -f \"$ROUTER_CONT_NAME\" 2>/dev/null || true
+    \$DOCKER_CMD run -d \
+        --name \"$ROUTER_CONT_NAME\" \
+        --network host \
+        --ulimit nofile=1048576:1048576 \
+        -v /tmp:/run_logs \
+        \"$DOCKER_IMAGE_NAME\" \
+        bash -lc \"mkdir -p /run_logs/slurm_job-${SLURM_JOB_ID} && exec python3 /app/vllm-src/examples/disaggregated/disaggregated_serving/moriio_toy_proxy_server.py --port ${ROUTER_PORT} 2>&1 | tee /run_logs/slurm_job-${SLURM_JOB_ID}/moriio_proxy_\$(hostname).log \"
+fi
+
 # Skip exec on vllm-disagg rank 0 so we can stop the router after the main
 # container exits.  Without this, decode nodes block forever waiting for the
 # router port to close (the router is a separate container).
 MAYBE_EXEC=exec
-if [[ \"$ENGINE\" == \"vllm-disagg\" && \"$ROUTER_TYPE\" == \"vllm-router\" && \"\$SLURM_PROCID\" == \"0\" ]]; then
+if [[ \"$ENGINE\" == \"vllm-disagg\" && ( \"$ROUTER_TYPE\" == \"vllm-router\" || \"$ROUTER_TYPE\" == \"moriio\" ) && \"\$SLURM_PROCID\" == \"0\" ]]; then
     MAYBE_EXEC=
     set +e
 fi
@@ -666,8 +685,8 @@ exit \$DOCKER_EXIT_CODE
 if [[ "${KEEP_CONTAINERS}" != "1" ]]; then
     srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'eval "$DOCKER_CMD_DETECT"; $DOCKER_CMD rm -f '"$DOCKER_CONT_NAME"' 2>/dev/null || true'
 
-    # Clean up vLLM external router container on node 0
-    if [[ "$ENGINE" == "vllm-disagg" && "$ROUTER_TYPE" == "vllm-router" ]]; then
+    # Clean up vLLM external router / MoRIIO toy-proxy container on node 0
+    if [[ "$ENGINE" == "vllm-disagg" && ( "$ROUTER_TYPE" == "vllm-router" || "$ROUTER_TYPE" == "moriio" ) ]]; then
         srun --nodes=1 --ntasks=1 --nodelist="$MASTER_NODE" bash -c '
             eval "$DOCKER_CMD_DETECT"; $DOCKER_CMD rm -f '"$ROUTER_CONT_NAME"' 2>/dev/null || true
         '
