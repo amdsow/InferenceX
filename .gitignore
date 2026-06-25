@@ -9,3 +9,4 @@ AMDSOW_CLUSTER_NOTES.md
 /benchmark_logs/
 /validation_*.json
 /collect_latest_results.py
+/run_dsr1_mi300x_validation.sh

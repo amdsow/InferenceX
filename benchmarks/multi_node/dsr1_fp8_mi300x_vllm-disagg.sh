@@ -9,7 +9,7 @@
 #
 # Supported topologies (1k1k and 8k1k): 1P1D, 1P2D, 1P3D, 2P1D, 2P2D, including
 # EP8 (prefill.ep=8 and/or decode.ep=8) and mixed TP8-prefill | EP8-decode,
-# with MTP speculative-decoding sizes 0/1/2/3 via DECODE_MTP_SIZE.
+# with MTP speculative-decoding sizes 0/1/2/3/4 via DECODE_MTP_SIZE.
 #
 # Model-specific vLLM flags live in amd_utils/models_vllm.yaml under the
 # DeepSeek-R1-0528 entry; EP/DP/TP/MTP are layered on by amd_utils/submit.sh
@@ -78,7 +78,7 @@ else
     export DECODE_ENABLE_DP=false
 fi
 
-# MTP speculative-decoding depth (0/1/2/3). Rides in via decode.additional-settings;
+# MTP speculative-decoding depth (0/1/2/3/4). Rides in via decode.additional-settings;
 # default to 0 (disabled) and re-export so it propagates through submit.sh ->
 # sbatch (--export=ALL) -> job.slurm -> server_vllm.sh, which derives IS_MTP and
 # the speculative config from it.
@@ -93,6 +93,12 @@ export DECODE_MTP_SIZE="${DECODE_MTP_SIZE:-0}"
 # --all2all-backend <backend> and suppresses the plain --tensor-parallel-size injection.
 export PREFILL_DP8EP="${PREFILL_DP8EP:-false}"
 export DECODE_DP8EP="${DECODE_DP8EP:-false}"
+
+# Router/proxy parity with amdsow-regress: that suite always fronts PD with the
+# in-image MoRIIO toy proxy (moriio_toy_proxy_server.py), never the Rust
+# vllm-router. Default this config to ROUTER_TYPE=moriio so job.slurm selects the
+# matching proxy branch; re-export so it rides submit.sh --export=ALL -> job.slurm.
+export ROUTER_TYPE="${ROUTER_TYPE:-moriio}"
 
 # DP8EP is authoritative over the legacy EP/DP-attention booleans: server_vllm.sh's
 # DP8EP branch emits --data-parallel-size + --enable-expert-parallel itself, so force

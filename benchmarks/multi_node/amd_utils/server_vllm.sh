@@ -444,6 +444,15 @@ if [ "$NODE_RANK" -eq 0 ]; then
             else
                 export EVAL_CONCURRENT_REQUESTS=$(echo "$BENCH_MAX_CONCURRENCY" | tr 'x' '\n' | sort -n | tail -1)
             fi
+            # Match eval context to the server's actual --max-model-len (min of
+            # prefill/decode) so lm-eval requests fit the served window instead of
+            # the model's native max (which the server rejects -> retries). R1 gsm8k
+            # CoT needs the full window (>=20480).
+            if [[ -z "${EVAL_MAX_MODEL_LEN:-}" ]]; then
+                EVAL_MAX_MODEL_LEN=$(printf '%s\n%s\n' "$PREFILL_SERVER_CONFIG" "$DECODE_SERVER_CONFIG" | grep -oE -- '--max-model-len[ =]+[0-9]+' | grep -oE '[0-9]+' | sort -n | head -1)
+                export EVAL_MAX_MODEL_LEN
+                echo "Set EVAL_MAX_MODEL_LEN=${EVAL_MAX_MODEL_LEN:-unparsed} from server --max-model-len"
+            fi
 
             if [[ "$DRY_RUN" -eq 1 ]]; then
                 echo "DRY RUN: run_eval --framework lm-eval --port $ROUTER_PORT (conc=${EVAL_CONCURRENT_REQUESTS}, ctx=${EVAL_MAX_MODEL_LEN:-auto})"

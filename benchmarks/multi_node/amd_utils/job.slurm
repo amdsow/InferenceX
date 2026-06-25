@@ -682,6 +682,23 @@ echo \"[rank 0] Main container exited (rc=\$DOCKER_EXIT_CODE). Stopping vllm-rou
 exit \$DOCKER_EXIT_CODE
 "
 
+# Archive per-node vLLM logs to a persistent shared dir while the allocation is
+# still held. Non-rank-0 logs live only on each node's local /tmp (-v /tmp:/run_logs),
+# so gather from every selected node here; BENCHMARK_LOGS_DIR/logs is wiped by the launcher.
+if [[ -n "${VLLM_LOG_ARCHIVE_DIR:-}" ]]; then
+    echo "[job.slurm] archiving per-node vLLM logs -> ${VLLM_LOG_ARCHIVE_DIR}"
+    mkdir -p "${VLLM_LOG_ARCHIVE_DIR}"
+    srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
+        src="/tmp/slurm_job-'"${SLURM_JOB_ID}"'"
+        dest="'"${VLLM_LOG_ARCHIVE_DIR}"'/$(hostname)"
+        if [[ -d "$src" ]]; then
+            mkdir -p "$dest"
+            sudo chmod -R a+rX "$src" 2>/dev/null || true
+            cp -a --no-preserve=ownership "$src"/. "$dest"/ 2>/dev/null || true
+        fi
+    '
+fi
+
 if [[ "${KEEP_CONTAINERS}" != "1" ]]; then
     srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'eval "$DOCKER_CMD_DETECT"; $DOCKER_CMD rm -f '"$DOCKER_CONT_NAME"' 2>/dev/null || true'
 
