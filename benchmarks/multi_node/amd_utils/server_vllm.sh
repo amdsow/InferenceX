@@ -267,6 +267,39 @@ if [[ "${DECODE_MTP_SIZE:-0}" -gt 0 ]]; then
     DECODE_SERVER_CONFIG+=" ${_mtp_spec_flag}"
 fi
 
+# Accuracy-only context expansion (gated on RUN_EVAL/EVAL_ONLY). PERF datapoints
+# that AMD must replicate are NEVER touched here -- they serve the submitted
+# models_vllm.yaml flags verbatim (DP8EP: --max-model-len 10240 + block-size 1 +
+# --num-gpu-blocks-override 1372000). Eval runs widen ONLY roles that actually
+# use the DP8EP profile, so mixed rows keep their TP8 side at the best-config
+# TP8 flags while DP8EP gets enough context for R1 GSM8K CoT (>=20480).
+# Tunable via EVAL_SERVER_MAX_MODEL_LEN / EVAL_SERVER_BLOCK_SIZE. models_vllm.yaml
+# is left byte-identical so the perf config stays reproducible.
+if [[ "${RUN_EVAL:-false}" == "true" || "${EVAL_ONLY:-false}" == "true" ]]; then
+    _eval_mml="${EVAL_SERVER_MAX_MODEL_LEN:-32768}"
+    _eval_bs="${EVAL_SERVER_BLOCK_SIZE:-64}"
+    _dp8ep_eval_roles=()
+    if _dp8ep_enabled "$PREFILL_DP8EP"; then
+        _cfg="$PREFILL_SERVER_CONFIG"
+        _cfg="$(echo "$_cfg" | sed -E "s/--max-model-len[[:space:]]+[0-9]+/--max-model-len ${_eval_mml}/g")"
+        _cfg="$(echo "$_cfg" | sed -E "s/--block-size[[:space:]]+[0-9]+/--block-size ${_eval_bs}/g")"
+        _cfg="$(echo "$_cfg" | sed -E "s/--num-gpu-blocks-override[[:space:]]+[0-9]+ ?//g")"
+        PREFILL_SERVER_CONFIG="$_cfg"
+        _dp8ep_eval_roles+=(prefill)
+    fi
+    if _dp8ep_enabled "$DECODE_DP8EP"; then
+        _cfg="$DECODE_SERVER_CONFIG"
+        _cfg="$(echo "$_cfg" | sed -E "s/--max-model-len[[:space:]]+[0-9]+/--max-model-len ${_eval_mml}/g")"
+        _cfg="$(echo "$_cfg" | sed -E "s/--block-size[[:space:]]+[0-9]+/--block-size ${_eval_bs}/g")"
+        _cfg="$(echo "$_cfg" | sed -E "s/--num-gpu-blocks-override[[:space:]]+[0-9]+ ?//g")"
+        DECODE_SERVER_CONFIG="$_cfg"
+        _dp8ep_eval_roles+=(decode)
+    fi
+    if [[ ${#_dp8ep_eval_roles[@]} -gt 0 ]]; then
+        echo "EVAL mode (DP8EP accuracy): roles=${_dp8ep_eval_roles[*]} widened to --max-model-len ${_eval_mml}, --block-size ${_eval_bs}, dropped --num-gpu-blocks-override (perf config in models_vllm.yaml unchanged)"
+    fi
+fi
+
 echo "PREFILL_SERVER_CONFIG (after TP/EP/DP): $PREFILL_SERVER_CONFIG"
 echo "DECODE_SERVER_CONFIG (after TP/EP/DP): $DECODE_SERVER_CONFIG"
 
@@ -483,6 +516,12 @@ if [ "$NODE_RANK" -eq 0 ]; then
             if [[ "$DRY_RUN" -eq 1 ]]; then
                 echo "DRY RUN: run_eval --framework lm-eval --port $ROUTER_PORT (conc=${EVAL_CONCURRENT_REQUESTS}, ctx=${EVAL_MAX_MODEL_LEN:-auto})"
             else
+                EVAL_COPY_DIR="${BENCHMARK_LOGS_DIR:-/run_logs}/logs/slurm_job-${SLURM_JOB_ID}/eval_results"
+                mkdir -p "$EVAL_COPY_DIR"
+                chmod -R a+rwX "$(dirname "$EVAL_COPY_DIR")" "$EVAL_COPY_DIR" 2>/dev/null || true
+                export EVAL_ARTIFACT_DIR="$EVAL_COPY_DIR"
+                export EVAL_RESULT_DIR="${EVAL_RESULT_DIR:-$EVAL_COPY_DIR}"
+                
                 run_eval --framework lm-eval --port "$ROUTER_PORT"
                 eval_rc=$?
 
@@ -510,13 +549,14 @@ if [ "$NODE_RANK" -eq 0 ]; then
 
                     append_lm_eval_summary
 
-                    EVAL_COPY_DIR="/run_logs/slurm_job-${SLURM_JOB_ID}/eval_results"
-                    mkdir -p "$EVAL_COPY_DIR"
-                    for f in meta_env.json; do
-                        [ -e "/workspace/$f" ] && cp -f "/workspace/$f" "$EVAL_COPY_DIR/"
-                    done
-                    find /workspace -maxdepth 1 -name 'results*.json' -exec cp -f {} "$EVAL_COPY_DIR/" \;
-                    find /workspace -maxdepth 1 -name 'sample*.jsonl' -exec cp -f {} "$EVAL_COPY_DIR/" \;
+                    if ! compgen -G "$EVAL_COPY_DIR/results*.json" > /dev/null; then
+                        for f in meta_env.json; do
+                            [ -e "/workspace/$f" ] && cp -f "/workspace/$f" "$EVAL_COPY_DIR/"
+                        done
+                        find /workspace -maxdepth 1 -name 'results*.json' -exec cp -f {} "$EVAL_COPY_DIR/" \;
+                        find /workspace -maxdepth 1 -name 'sample*.jsonl' -exec cp -f {} "$EVAL_COPY_DIR/" \;
+                    fi
+                    chmod -R a+rwX "$EVAL_COPY_DIR" 2>/dev/null || true
 
                     echo "Eval completed. Artifacts staged in $EVAL_COPY_DIR"
                 fi
@@ -531,7 +571,8 @@ if [ "$NODE_RANK" -eq 0 ]; then
     mkdir -p "$LOGS_OUTPUT"
 
     if [[ "$DRY_RUN" -eq 0 ]]; then
-        cp -r /run_logs/slurm_job-${SLURM_JOB_ID} "$LOGS_OUTPUT/"
+        cp -r /run_logs/slurm_job-${SLURM_JOB_ID} "$LOGS_OUTPUT/" 2>/dev/null || true
+        chmod -R a+rwX "$LOGS_OUTPUT/slurm_job-${SLURM_JOB_ID}" 2>/dev/null || true
         echo "Copied results to $LOGS_OUTPUT/slurm_job-${SLURM_JOB_ID}"
     fi
 

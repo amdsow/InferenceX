@@ -630,6 +630,22 @@ if _TemplateAPI is not None and _JsonChatStr is not None:
             )
 
     _TemplateAPI.apply_chat_template = _patched_apply_chat_template
+
+# --- Patch aiohttp ClientResponse.json to tolerate the proxy's text/html mimetype ---
+# The MoRIIO toy proxy streams a valid-JSON body but Quart make_response() leaves the
+# Content-Type at its text/html default, so lm-eval's amodel_call response.json()
+# raises aiohttp ContentTypeError on every response (then the unbound-'outputs' handler
+# masks it and the session cascades). Default content_type=None to bypass aiohttp's
+# mimetype check; the body is still parsed as JSON.
+try:
+    import aiohttp as _aiohttp
+    _orig_resp_json = _aiohttp.ClientResponse.json
+    async def _patched_resp_json(self, *args, **kwargs):
+        kwargs.setdefault("content_type", None)
+        return await _orig_resp_json(self, *args, **kwargs)
+    _aiohttp.ClientResponse.json = _patched_resp_json
+except Exception:
+    pass
 PY
     export PYTHONPATH="${patch_dir}:${PYTHONPATH:-}"
 }
@@ -942,6 +958,26 @@ META
 
     if [ -n "$batch_concs" ]; then
         echo "Prepared batched eval artifacts in: $(pwd)"
+        return 0
+    fi
+
+    if [ -n "${EVAL_ARTIFACT_DIR:-}" ]; then
+        mkdir -p "${EVAL_ARTIFACT_DIR}" || return 1
+        if [ "${out_dir}" != "${EVAL_ARTIFACT_DIR}" ]; then
+            if [ -f "${meta_json}" ]; then
+                mv -f "${meta_json}" "${EVAL_ARTIFACT_DIR}/" || return 1
+            fi
+            if [ -d "${out_dir}" ]; then
+                while IFS= read -r -d '' jf; do
+                    base=$(basename "$jf")
+                    if [ "$base" != "meta_env.json" ]; then
+                        mv -f "$jf" "${EVAL_ARTIFACT_DIR}/" || return 1
+                    fi
+                done < <(find "${out_dir}" -type f -name "*.json*" -print0 2>/dev/null)
+                rm -rf --one-file-system "${out_dir}" || rm -rf "${out_dir}" || true
+            fi
+        fi
+        echo "Moved eval artifacts to: ${EVAL_ARTIFACT_DIR}"
         return 0
     fi
 

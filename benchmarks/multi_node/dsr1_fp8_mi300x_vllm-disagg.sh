@@ -84,13 +84,10 @@ fi
 # the speculative config from it.
 export DECODE_MTP_SIZE="${DECODE_MTP_SIZE:-0}"
 
-# DP8EP mode (1k1k EP8 rows + mixed 8k1k EP8-decode rows). Distinct from dp-attn:
-# vLLM does data-parallel attention via --data-parallel-size, not the SGLang
-# --enable-dp-attention. These booleans ride in via additional-settings; default
-# false and re-export so they reach server_vllm.sh (via submit.sh --export=ALL +
-# job.slurm -e). When true, server_vllm.sh emits
-# --tensor-parallel-size 1 --data-parallel-size <tp_size> --enable-expert-parallel
-# --all2all-backend <backend> and suppresses the plain --tensor-parallel-size injection.
+# DP8EP mode (1k1k EP8 rows + mixed 8k1k EP8-decode rows). This selects the
+# wide-EP vLLM profile via additional-settings. *_DP_ATTN still rides through as
+# the requested row/env/metadata value; the DP8EP server CLI remains expressed by
+# --data-parallel-size rather than the unsupported --enable-dp-attention flag.
 export PREFILL_DP8EP="${PREFILL_DP8EP:-false}"
 export DECODE_DP8EP="${DECODE_DP8EP:-false}"
 
@@ -100,17 +97,13 @@ export DECODE_DP8EP="${DECODE_DP8EP:-false}"
 # matching proxy branch; re-export so it rides submit.sh --export=ALL -> job.slurm.
 export ROUTER_TYPE="${ROUTER_TYPE:-moriio}"
 
-# DP8EP is authoritative over the legacy EP/DP-attention booleans: server_vllm.sh's
-# DP8EP branch emits --data-parallel-size + --enable-expert-parallel itself, so force
-# the per-role ENABLE_EP/ENABLE_DP off here (the YAML keeps an honest ep:8). This
-# guarantees no duplicate --enable-expert-parallel regardless of the ep integer.
+# DP8EP is authoritative over the legacy EP boolean. Keep ENABLE_DP as derived
+# from *_DP_ATTN so an explicit dp-attn test still reaches submit.sh/server_vllm.sh.
 if [[ "$PREFILL_DP8EP" == "true" ]]; then
     export PREFILL_ENABLE_EP=false
-    export PREFILL_ENABLE_DP=false
 fi
 if [[ "$DECODE_DP8EP" == "true" ]]; then
     export DECODE_ENABLE_EP=false
-    export DECODE_ENABLE_DP=false
 fi
 
 # Parameter order matches SGLang disagg submit.sh; arg 16 is optional NODELIST.
