@@ -500,7 +500,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
             if [[ -n "${EVAL_CONC:-}" ]]; then
                 export EVAL_CONCURRENT_REQUESTS="${EVAL_CONC}"
             else
-                export EVAL_CONCURRENT_REQUESTS=$(echo "$BENCH_MAX_CONCURRENCY" | tr 'x' '\n' | sort -n | tail -1)
+                export EVAL_CONCURRENT_REQUESTS=64
             fi
             # Match eval context to the server's actual --max-model-len (min of
             # prefill/decode) so lm-eval requests fit the served window instead of
