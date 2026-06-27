@@ -271,13 +271,13 @@ fi
 # that AMD must replicate are NEVER touched here -- they serve the submitted
 # models_vllm.yaml flags verbatim (DP8EP: --max-model-len 10240 + block-size 1 +
 # --num-gpu-blocks-override 1372000). Eval runs widen ONLY roles that actually
-# use the DP8EP profile, so mixed rows keep their TP8 side at the best-config
-# TP8 flags while DP8EP gets enough context for R1 GSM8K CoT (>=20480).
+# use the DP8EP profile, so mixed rows keep their TP8 side unchanged while DP8EP
+# gets enough context for R1 GSM8K CoT (>=20480) without the perf-only block map.
 # Tunable via EVAL_SERVER_MAX_MODEL_LEN / EVAL_SERVER_BLOCK_SIZE. models_vllm.yaml
 # is left byte-identical so the perf config stays reproducible.
 if [[ "${RUN_EVAL:-false}" == "true" || "${EVAL_ONLY:-false}" == "true" ]]; then
-    _eval_mml="${EVAL_SERVER_MAX_MODEL_LEN:-32768}"
-    _eval_bs="${EVAL_SERVER_BLOCK_SIZE:-64}"
+    _eval_mml="${EVAL_SERVER_MAX_MODEL_LEN:-20480}"
+    _eval_bs="${EVAL_SERVER_BLOCK_SIZE:-1}"
     _dp8ep_eval_roles=()
     if _dp8ep_enabled "$PREFILL_DP8EP"; then
         _cfg="$PREFILL_SERVER_CONFIG"

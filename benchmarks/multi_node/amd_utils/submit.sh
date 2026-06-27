@@ -141,6 +141,8 @@ export BENCH_RANDOM_RANGE_RATIO=${RANDOM_RANGE_RATIO:-0.8}
 export RUN_EVAL="${RUN_EVAL:-false}"
 export EVAL_ONLY="${EVAL_ONLY:-false}"
 export EVAL_CONC="${EVAL_CONC:-}"
+export EVAL_SERVER_MAX_MODEL_LEN="${EVAL_SERVER_MAX_MODEL_LEN:-20480}"
+export EVAL_SERVER_BLOCK_SIZE="${EVAL_SERVER_BLOCK_SIZE:-1}"
 export FRAMEWORK="${FRAMEWORK:-}"
 export PRECISION="${PRECISION:-}"
 export MODEL_PREFIX="${MODEL_PREFIX:-}"
@@ -151,7 +153,8 @@ export IS_MULTINODE="${IS_MULTINODE:-false}"
 
 # Log directory: must be on NFS (shared filesystem) so the submit host can read SLURM output.
 export BENCHMARK_LOGS_DIR="${BENCHMARK_LOGS_DIR:-$(pwd)/benchmark_logs}"
-mkdir -p "$BENCHMARK_LOGS_DIR"
+mkdir -p "$BENCHMARK_LOGS_DIR/logs"
+chmod -R a+rwX "$BENCHMARK_LOGS_DIR" 2>/dev/null || true
 
 # Optional: pass an explicit node list to sbatch.
 NODELIST_OPT=()
@@ -255,6 +258,7 @@ if [[ "${SUBMIT_DRY_RUN:-0}" == "1" ]]; then
                  DECODE_TP_SIZE DECODE_ENABLE_EP DECODE_ENABLE_DP DECODE_DP8EP \
                  DECODE_MTP_SIZE SPEC_DECODING MODEL_NAME MODEL_DIR DOCKER_IMAGE_NAME \
                  ROUTER_TYPE \
+                 RUN_EVAL EVAL_ONLY EVAL_CONC EVAL_SERVER_MAX_MODEL_LEN EVAL_SERVER_BLOCK_SIZE \
                  BENCH_INPUT_LEN BENCH_OUTPUT_LEN BENCH_MAX_CONCURRENCY \
                  BENCH_REQUEST_RATE BENCH_RANDOM_RANGE_RATIO; do
             printf '  %s=%s\n' "$v" "${!v:-}"
