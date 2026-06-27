@@ -356,17 +356,20 @@ print(json.dumps(extra, separators=(',', ':')))
 # ping port, and HTTP port are always nested inside kv_connector_extra_config.
 build_kv_config() {
     local role="$1"
-    python3 -c "
-import json
+    local role_dp8ep="$2"
+    ROLE_DP8EP="$role_dp8ep" python3 -c "
+import json, os
 extra = json.loads('''${KV_TRANSFER_CONFIG_BASE}''')
+if os.environ.get('ROLE_DP8EP', '').lower() in ('1', 'true', 'yes', 'on'):
+    extra.pop('allow_full_cudagraph', None)
 extra.update({'proxy_ip': '${NODE0_ADDR}', 'proxy_ping_port': '${PROXY_PING_PORT}', 'http_port': '${SERVER_PORT}'})
 cfg = {'kv_connector': 'MoRIIOConnector', 'kv_role': '${role}', 'kv_connector_extra_config': extra}
 print(json.dumps(cfg, separators=(',', ':')))
 "
 }
 
-KV_TRANSFER_CONFIG_PRODUCER=$(build_kv_config kv_producer)
-KV_TRANSFER_CONFIG_CONSUMER=$(build_kv_config kv_consumer)
+KV_TRANSFER_CONFIG_PRODUCER=$(build_kv_config kv_producer "$PREFILL_DP8EP")
+KV_TRANSFER_CONFIG_CONSUMER=$(build_kv_config kv_consumer "$DECODE_DP8EP")
 
 # vLLM runtime environment (static vars moved to env.sh; these depend on per-node state)
 setup_vllm_env() {
