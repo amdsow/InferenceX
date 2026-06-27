@@ -13,8 +13,8 @@
 | Field | Value |
 |---|---|
 | Document | AMDSOW InferenceX user guide |
-| Version | v1.0.0 |
-| Last updated | 2026-06-25 |
+| Version | v1.1.0 |
+| Last updated | 2026-06-27 |
 | Owner | MangoBoost AMDSOW delivery team |
 | Contact | contact@mangoboost.io |
 | Audience | AMD/customer operators and solution engineers |
@@ -32,6 +32,51 @@ This guide is for the operator who needs to run the AMDSOW DeepSeek-R1-0528 FP8 
 In plain terms: you select one checked-in YAML row. GitHub Actions starts the run. A self-hosted runner submits a Slurm job. Slurm allocates MI300X GPU nodes. Docker starts vLLM prefill and decode workers. The benchmark client sends requests and writes JSON results.
 
 Use the GitHub Actions path first. Use the manual Slurm path only when Actions is unavailable or you are debugging directly from a Slurm-capable host.
+
+## Fresh-eye quick start
+
+Use this path if you are opening the repository for the first time and just need one clean validation run.
+
+1. Confirm you are in the repo root:
+
+   ```bash
+   cd /mnt/shared_mango/amdsow-deliveries/regress/amdsow-inferencex-pr
+   git branch --show-current
+   ```
+
+2. Decide which run path you are using:
+
+   | Situation | Use this path |
+   |---|---|
+   | You have GitHub Actions access and want the normal operator path | Sections 6-9 |
+   | You are on a Slurm-capable host and want direct control/debugging | Section 10 |
+   | You need the full 20-row best-config regression | Section 10, "Run the full 20-row best-config regression" |
+
+3. For the first smoke test, run `8k1k c256`. It is the default row and uses 3 Slurm nodes.
+
+4. If you are on a Slurm-capable host, check the local queue before submitting:
+
+   ```bash
+   squeue -u "$USER" -o '%.18i %.30j %.8T %.20R'
+   sinfo -p compute -N -o '%N %t %E'
+   ```
+
+   Skip this step when you are only dispatching through GitHub Actions from a non-cluster workstation.
+
+5. After a manual Slurm job finishes, summarize the exact log directory from that run:
+
+   ```bash
+   python3 utils/summarize_slurm_results.py "$BENCHMARK_LOGS_DIR"
+   ```
+
+Expected clean end state:
+
+- Slurm job state is `COMPLETED`.
+- The log directory contains `slurm_job-<job-id>.out` and `slurm_job-<job-id>.err`.
+- The summary script prints rows with `State` = `DONE`.
+- GSM8K is in the expected mid-90% range for the current MI300X DSR1 setup.
+
+Do not edit YAML, pin nodes, or change Docker images for a first run. Use the checked-in config and the production image first; change one variable at a time only when debugging.
 
 ## 1. What you are running
 
@@ -336,8 +381,11 @@ export DECODE_NUM_WORKERS=1 DECODE_TP=8 DECODE_EP=8 DECODE_DP_ATTN=false DECODE_
 export MODEL="deepseek-ai/DeepSeek-R1-0528" MODEL_PREFIX="dsr1" PRECISION=fp8 FRAMEWORK="vllm-disagg"
 export IMAGE="docker.io/chaeminlimmb/vllm-mori-pd:milestone4-aiterwheel" RANDOM_RANGE_RATIO=0.8
 export IS_MULTINODE=true KEEP_LOGS=1
+export RUN_EVAL=true EVAL_ONLY=false EVAL_SERVER_MAX_MODEL_LEN=20480 EVAL_SERVER_BLOCK_SIZE=1
+unset EVAL_CONC
 export RUNNER_NAME="amdsow-dsr1-c256-$(date -u +%Y%m%dT%H%M%SZ)" RUNNER_TYPE="mi300x-disagg"
 export GITHUB_WORKSPACE="$PWD" BENCHMARK_LOGS_DIR="$PWD/benchmark_logs"
+export AMDSOW_SLURM_EXCLUDE_NODES="${AMDSOW_SLURM_EXCLUDE_NODES:-a05u43,a04u43}"
 
 # Optional. Preserve raw per-node vLLM logs on shared storage.
 # export VLLM_LOG_ARCHIVE_DIR="$PWD/vllm_logs_8k1k_c256_$(date -u +%Y%m%dT%H%M%SZ)"
@@ -345,11 +393,17 @@ export RESULT_FILENAME="validation_8k1k_c256"
 
 # Optional. Pin exactly 3 idle nodes discovered with sinfo/squeue. Leave unset to let Slurm choose.
 # export NODELIST="<node-a>,<node-b>,<node-c>"
-# Optional. Skip known-bad nodes for this site.
-# export AMDSOW_SLURM_EXCLUDE_NODES="<node-x>,<node-y>"
 ```
 
 `BENCHMARK_LOGS_DIR` must be on shared storage visible from the submit host and allocated Slurm nodes. `$PWD/benchmark_logs` is safe only when this repo path is shared across the cluster.
+
+Run a no-allocation dry run before the real submit:
+
+```bash
+SUBMIT_DRY_RUN=1 bash runners/launch_mi300x-amds.sh
+```
+
+The dry run should print `SUBMIT_DRY_RUN=1: not calling sbatch` and a resolved `sbatch` command. It should also show the intended node count and exported env. Fix env mistakes before continuing.
 
 Launch detached and follow the launcher log:
 
@@ -357,6 +411,25 @@ Launch detached and follow the launcher log:
 setsid bash runners/launch_mi300x-amds.sh </dev/null >/tmp/run_8k1k_c256.log 2>&1 &
 tail -f /tmp/run_8k1k_c256.log
 ```
+
+When the job completes, print a compact result table from the Slurm log directory:
+
+```bash
+python3 utils/summarize_slurm_results.py "$BENCHMARK_LOGS_DIR"
+```
+
+The table columns are:
+
+| Column | Meaning |
+|---|---|
+| `Row` | Sequence length plus concurrency, for example `8k1k_c256`. |
+| `State` | `DONE` when the script found a completed benchmark result block. |
+| `Total` | Total token throughput per GPU. |
+| `Gen` | Output token throughput per decode GPU. |
+| `Interactivity` | `1000 / mean TPOT ms`; higher is better. |
+| `E2E` | Mean end-to-end request latency. |
+| `Cost` | Relative cost score using the default `390 / Total` convention. |
+| `GSM8K strict/flex` | lm-eval accuracy if `RUN_EVAL=true`; otherwise `-`. |
 
 ### Run the full 20-row best-config regression
 
@@ -401,16 +474,15 @@ unset EVAL_CONC
 
 # Optional site-local exclusions.
 export AMDSOW_SLURM_EXCLUDE_NODES="${AMDSOW_SLURM_EXCLUDE_NODES:-a05u43,a04u43}"
+export RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
 submit_best() {
   local row="$1"
-  local ts
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  export RUNNER_NAME="mi300x-best20-${row}-${ts}"
+  export RUNNER_NAME="mi300x-best20-${row}-${RUN_TS}"
   export RESULT_FILENAME="validation_${row}"
-  export BENCHMARK_LOGS_DIR="$PWD/benchmark_logs_best20_${row}_${ts}"
-  setsid bash runners/launch_mi300x-amds.sh </dev/null >"/tmp/run_best20_${row}_${ts}.log" 2>&1 &
-  echo "$row pid=$! launcher_log=/tmp/run_best20_${row}_${ts}.log logs=$BENCHMARK_LOGS_DIR"
+  export BENCHMARK_LOGS_DIR="$PWD/benchmark_logs_best20_${row}_${RUN_TS}"
+  setsid bash runners/launch_mi300x-amds.sh </dev/null >"/tmp/run_best20_${row}_${RUN_TS}.log" 2>&1 &
+  echo "$row pid=$! launcher_log=/tmp/run_best20_${row}_${RUN_TS}.log logs=$BENCHMARK_LOGS_DIR"
   sleep 2
 }
 
@@ -466,6 +538,20 @@ squeue -u "$USER" -o '%i %.52j %.10T %.20R %N %.12M %.12l'
 tail -f benchmark_logs_best20_*/slurm_job-*.out
 ```
 
+After all jobs reach `COMPLETED`, summarize only the new best20 log directories from that run:
+
+```bash
+python3 utils/summarize_slurm_results.py benchmark_logs_best20_*_"$RUN_TS"/
+```
+
+If you submitted with the block above and did not save the timestamp, this also works and picks the newest log per row from the paths you pass:
+
+```bash
+python3 utils/summarize_slurm_results.py benchmark_logs_best20_*/
+```
+
+Use the broad glob only when the workspace does not contain unrelated or stale best20 logs you do not want included.
+
 Interrupting `tail -f` does not stop the launcher or Slurm allocation. Use these commands to monitor and cancel:
 
 ```bash
@@ -494,7 +580,8 @@ Manual-run notes:
 | `FATAL: Model ... not found. Searched:` | Stage `DeepSeek-R1-0528` under the expected model root on every allocated node. |
 | Benchmark artifact missing | Read `gh run view --log-failed`, then Slurm `.out/.err`. |
 | Raw vLLM logs missing | Set `VLLM_LOG_ARCHIVE_DIR` before rerun; the default MI300X path does not preserve them reliably. |
-| Metrics row is zero/empty | Confirm the local validation output matched c256 and inspect the per-concurrency JSON. |
+| Metrics row is zero/empty | Confirm the local validation output matched c256, then run `python3 utils/summarize_slurm_results.py "$BENCHMARK_LOGS_DIR"`. |
+| Summary script says no logs found | Pass the directory that contains `slurm_job-<id>.out`, not only the repo root. |
 | Manual run keeps running after closing the terminal | Find it with `squeue --name "$RUNNER_NAME"` and cancel the Slurm job id. |
 
 ## 12. Golden rules

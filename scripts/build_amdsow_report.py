@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 TODAY = dt.date.today().isoformat()
-VERSION = "v1.0.0"
+VERSION = "v1.1.0"
 
 
 @dataclass(frozen=True)
