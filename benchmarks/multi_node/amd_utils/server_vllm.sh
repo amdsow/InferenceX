@@ -272,7 +272,8 @@ fi
 # models_vllm.yaml flags verbatim (DP8EP: --max-model-len 10240 + block-size 1 +
 # --num-gpu-blocks-override 1372000). Eval runs widen ONLY roles that actually
 # use the DP8EP profile, so mixed rows keep their TP8 side unchanged while DP8EP
-# gets enough context for R1 GSM8K CoT (>=20480) without the perf-only block map.
+# gets enough context for R1 GSM8K CoT (>=20480) while keeping the fixed DP8EP
+# block map used by the corresponding perf row.
 # Tunable via EVAL_SERVER_MAX_MODEL_LEN / EVAL_SERVER_BLOCK_SIZE. models_vllm.yaml
 # is left byte-identical so the perf config stays reproducible.
 if [[ "${RUN_EVAL:-false}" == "true" || "${EVAL_ONLY:-false}" == "true" ]]; then
@@ -283,7 +284,6 @@ if [[ "${RUN_EVAL:-false}" == "true" || "${EVAL_ONLY:-false}" == "true" ]]; then
         _cfg="$PREFILL_SERVER_CONFIG"
         _cfg="$(echo "$_cfg" | sed -E "s/--max-model-len[[:space:]]+[0-9]+/--max-model-len ${_eval_mml}/g")"
         _cfg="$(echo "$_cfg" | sed -E "s/--block-size[[:space:]]+[0-9]+/--block-size ${_eval_bs}/g")"
-        _cfg="$(echo "$_cfg" | sed -E "s/--num-gpu-blocks-override[[:space:]]+[0-9]+ ?//g")"
         PREFILL_SERVER_CONFIG="$_cfg"
         _dp8ep_eval_roles+=(prefill)
     fi
@@ -291,12 +291,11 @@ if [[ "${RUN_EVAL:-false}" == "true" || "${EVAL_ONLY:-false}" == "true" ]]; then
         _cfg="$DECODE_SERVER_CONFIG"
         _cfg="$(echo "$_cfg" | sed -E "s/--max-model-len[[:space:]]+[0-9]+/--max-model-len ${_eval_mml}/g")"
         _cfg="$(echo "$_cfg" | sed -E "s/--block-size[[:space:]]+[0-9]+/--block-size ${_eval_bs}/g")"
-        _cfg="$(echo "$_cfg" | sed -E "s/--num-gpu-blocks-override[[:space:]]+[0-9]+ ?//g")"
         DECODE_SERVER_CONFIG="$_cfg"
         _dp8ep_eval_roles+=(decode)
     fi
     if [[ ${#_dp8ep_eval_roles[@]} -gt 0 ]]; then
-        echo "EVAL mode (DP8EP accuracy): roles=${_dp8ep_eval_roles[*]} widened to --max-model-len ${_eval_mml}, --block-size ${_eval_bs}, dropped --num-gpu-blocks-override (perf config in models_vllm.yaml unchanged)"
+        echo "EVAL mode (DP8EP accuracy): roles=${_dp8ep_eval_roles[*]} widened to --max-model-len ${_eval_mml}, --block-size ${_eval_bs}, keeping --num-gpu-blocks-override from models_vllm.yaml"
     fi
 fi
 
